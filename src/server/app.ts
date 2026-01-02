@@ -210,8 +210,9 @@ export function createApp(): Application {
     // This survives cross-site redirects where cookies may not be sent
     let sessionId = state ? oauthManager.decodeStateSessionId(state as string) : null;
 
-    // Fall back to cookie if state decoding fails
-    if (!sessionId) {
+    // Only fall back to cookie if we have a state but couldn't decode it
+    // Don't use stale cookies for direct tests (no state parameter)
+    if (!sessionId && state) {
       sessionId = req.cookies.tanda_session;
     }
 
