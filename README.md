@@ -1,11 +1,14 @@
 # Tanda Workforce MCP Server
 
-A production-ready MCP (Model Context Protocol) server for integrating Tanda Workforce API with AI assistants like Claude. Features OAuth2 authentication and comprehensive workforce management tools.
+A production-ready MCP (Model Context Protocol) server for integrating Tanda Workforce API with AI assistants like Claude. Features OAuth2 authentication with PKCE support and comprehensive workforce management tools.
 
 ## Features
 
-- **OAuth2 Authentication** - Secure authentication flow with Tanda
-- **MCP Protocol Support** - Full JSON-RPC 2.0 implementation
+- **OAuth2 Authentication** - Secure authentication with Tanda including PKCE (RFC 7636)
+- **Claude.ai & Desktop Support** - Works with both Claude.ai (OAuth flow) and Claude Desktop (JWT tokens)
+- **Dynamic Client Registration** - RFC 7591 support for Claude MCP integration
+- **SSE Real-time Transport** - Server-Sent Events for MCP remote transport
+- **MCP Protocol Support** - Full JSON-RPC 2.0 implementation (protocol version 2024-11-05)
 - **25+ Workforce Tools** - Users, schedules, timesheets, leave, clock-in/out, and more
 - **Production Ready** - Docker support, rate limiting, security headers, logging
 - **TypeScript** - Fully typed codebase
@@ -30,7 +33,7 @@ cp .env.example .env
 Required environment variables:
 - `TANDA_CLIENT_ID` - Your Tanda OAuth client ID
 - `TANDA_CLIENT_SECRET` - Your Tanda OAuth client secret
-- `TANDA_REDIRECT_URI` - OAuth callback URL (e.g., `http://localhost:3000/auth/callback`)
+- `TANDA_REDIRECT_URI` - OAuth callback URL (e.g., `https://your-domain.com/auth/callback`)
 - `SESSION_SECRET` - Random 32+ character string
 - `JWT_SECRET` - Random 32+ character string
 
@@ -48,19 +51,35 @@ npm start
 docker-compose up -d
 ```
 
-## Adding to Claude
+## Connecting to Claude
 
-### Claude Desktop Configuration
+### Option 1: Claude.ai (Recommended)
 
-Add to your Claude config file:
+Claude.ai uses OAuth 2.0 with Dynamic Client Registration. Simply provide your MCP server URL:
+
+```
+https://your-domain.com/mcp
+```
+
+Claude.ai will:
+1. Discover OAuth endpoints via `/.well-known/oauth-authorization-server`
+2. Register as a client via `/oauth/register`
+3. Initiate OAuth flow with PKCE via `/authorize`
+4. Exchange code for token via `/token`
+5. Connect via SSE to `/mcp` for real-time communication
+
+### Option 2: Claude Desktop
+
+Add to your Claude Desktop config file:
 
 **macOS**: `~/Library/Application Support/Claude/claude_desktop_config.json`
+**Windows**: `%APPDATA%\Claude\claude_desktop_config.json`
 
 ```json
 {
   "mcpServers": {
     "tanda-workforce": {
-      "url": "https://your-server.com/mcp",
+      "url": "https://your-domain.com/mcp",
       "headers": {
         "Authorization": "Bearer YOUR_JWT_TOKEN"
       }
@@ -69,23 +88,60 @@ Add to your Claude config file:
 }
 ```
 
-### Getting a JWT Token
+#### Getting a JWT Token
 
-1. Navigate to `https://your-server.com/auth/login`
+1. Navigate to `https://your-domain.com/auth/login`
 2. Authenticate with your Tanda account
 3. Copy the returned JWT token
 
+## Team Member Access
+
+Each team member can connect to the same MCP server:
+
+1. **Individual Authentication**: Each person authenticates with their own Tanda credentials
+2. **Separate Sessions**: Each authenticated user gets their own session
+3. **Permission-Based Access**: Tool access depends on each user's Tanda permissions
+
+> **Note**: Sessions are stored in-memory. For production deployments with multiple server instances, consider implementing a shared session store (e.g., Redis).
+
 ## API Endpoints
+
+### Core Endpoints
 
 | Endpoint | Method | Description |
 |----------|--------|-------------|
-| `/` | GET | Server info |
+| `/` | GET | Server info and endpoint listing |
 | `/health` | GET | Health check |
 | `/docs` | GET | API documentation |
-| `/auth/login` | GET | Start OAuth flow |
-| `/auth/callback` | GET | OAuth callback |
-| `/api/authenticate` | POST | Exchange code for token |
-| `/mcp` | POST | MCP protocol endpoint |
+| `/stats` | GET | Server statistics |
+
+### OAuth 2.0 Endpoints
+
+| Endpoint | Method | Description |
+|----------|--------|-------------|
+| `/.well-known/oauth-authorization-server` | GET | OAuth discovery (RFC 8414) |
+| `/oauth/register` | POST | Dynamic Client Registration (RFC 7591) |
+| `/authorize` | GET | OAuth2 authorization endpoint |
+| `/token` | POST | OAuth2 token endpoint (supports PKCE) |
+
+### Authentication Endpoints
+
+| Endpoint | Method | Description |
+|----------|--------|-------------|
+| `/auth/login` | GET | Start OAuth flow (browser) |
+| `/auth/callback` | GET | OAuth callback handler |
+| `/auth/status` | GET | Check authentication status |
+| `/auth/logout` | POST | Logout and invalidate session |
+| `/api/authenticate` | POST | Exchange code for JWT token |
+| `/api/me` | GET | Get current user (protected) |
+
+### MCP Endpoints
+
+| Endpoint | Method | Description |
+|----------|--------|-------------|
+| `/mcp` | GET | SSE endpoint for real-time transport |
+| `/mcp` | POST | MCP JSON-RPC 2.0 endpoint |
+| `/` | POST | MCP endpoint (Claude compatibility) |
 
 ## Available Tools
 
@@ -122,6 +178,7 @@ Add to your Claude config file:
 - `tanda_get_departments` - List departments
 - `tanda_get_locations` - List locations
 - `tanda_get_qualifications` - List qualifications
+- `tanda_get_user_qualifications` - Get user qualifications
 
 ### Costs & Awards
 - `tanda_get_roster_costs` - Get labor costs
@@ -154,6 +211,9 @@ npm run build
 
 # Run linter
 npm run lint
+
+# Run tests
+npm test
 ```
 
 ## Project Structure
@@ -176,6 +236,7 @@ npm run lint
 │   ├── utils/          # Utilities
 │   │   └── logger.ts
 │   └── index.ts        # Entry point
+├── tests/              # Test files
 ├── Dockerfile
 ├── docker-compose.yml
 ├── DEPLOYMENT.md       # Full deployment guide
