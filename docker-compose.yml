@@ -1,0 +1,46 @@
+version: '3.8'
+
+services:
+  tanda-mcp-server:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: tanda-mcp-server
+    restart: unless-stopped
+    ports:
+      - "${PORT:-3000}:3000"
+    environment:
+      - NODE_ENV=${NODE_ENV:-production}
+      - PORT=3000
+      - HOST=0.0.0.0
+      - TANDA_CLIENT_ID=${TANDA_CLIENT_ID}
+      - TANDA_CLIENT_SECRET=${TANDA_CLIENT_SECRET}
+      - TANDA_REDIRECT_URI=${TANDA_REDIRECT_URI}
+      - TANDA_API_BASE_URL=${TANDA_API_BASE_URL:-https://my.tanda.co/api/v2}
+      - TANDA_AUTH_URL=${TANDA_AUTH_URL:-https://my.tanda.co/api/oauth/authorize}
+      - TANDA_TOKEN_URL=${TANDA_TOKEN_URL:-https://my.tanda.co/api/oauth/token}
+      - SESSION_SECRET=${SESSION_SECRET}
+      - JWT_SECRET=${JWT_SECRET}
+      - JWT_EXPIRY=${JWT_EXPIRY:-24h}
+      - CORS_ORIGINS=${CORS_ORIGINS:-*}
+      - RATE_LIMIT_WINDOW_MS=${RATE_LIMIT_WINDOW_MS:-900000}
+      - RATE_LIMIT_MAX_REQUESTS=${RATE_LIMIT_MAX_REQUESTS:-100}
+      - MCP_SERVER_NAME=${MCP_SERVER_NAME:-tanda-workforce-mcp}
+      - MCP_SERVER_VERSION=${MCP_SERVER_VERSION:-1.0.0}
+    healthcheck:
+      test: ["CMD", "wget", "--no-verbose", "--tries=1", "--spider", "http://localhost:3000/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 10s
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "10m"
+        max-file: "3"
+    networks:
+      - tanda-network
+
+networks:
+  tanda-network:
+    driver: bridge
