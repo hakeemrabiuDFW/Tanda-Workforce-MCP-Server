@@ -27,6 +27,7 @@ interface AuthCodeData {
   sessionId: string;
   createdAt: number;
   used: boolean;
+  codeChallenge?: string;  // For PKCE validation
 }
 const authCodes = new Map<string, AuthCodeData>();
 
@@ -305,19 +306,20 @@ export class OAuthManager {
   }
 
   // Generate an authorization code for OAuth2 flow (for Claude MCP)
-  generateAuthCode(sessionId: string): string {
+  generateAuthCode(sessionId: string, codeChallenge?: string): string {
     const code = uuidv4();
     authCodes.set(code, {
       sessionId,
       createdAt: Date.now(),
       used: false,
+      codeChallenge,
     });
-    logger.info(`Generated auth code for session: ${sessionId}`);
+    logger.info(`Generated auth code for session: ${sessionId}, has PKCE: ${!!codeChallenge}`);
     return code;
   }
 
   // Exchange authorization code for JWT (for Claude MCP /token endpoint)
-  exchangeAuthCode(code: string): { success: boolean; accessToken?: string; error?: string } {
+  exchangeAuthCode(code: string, codeVerifier?: string): { success: boolean; accessToken?: string; error?: string } {
     const authCodeData = authCodes.get(code);
 
     if (!authCodeData) {
@@ -337,6 +339,27 @@ export class OAuthManager {
       logger.warn(`Auth code expired: ${code}`);
       authCodes.delete(code);
       return { success: false, error: 'Authorization code expired' };
+    }
+
+    // Validate PKCE if code_challenge was provided during authorization
+    if (authCodeData.codeChallenge) {
+      if (!codeVerifier) {
+        logger.warn(`PKCE code_verifier required but not provided`);
+        return { success: false, error: 'code_verifier required' };
+      }
+
+      // Validate code_verifier against code_challenge (S256 method)
+      const crypto = require('crypto');
+      const expectedChallenge = crypto
+        .createHash('sha256')
+        .update(codeVerifier)
+        .digest('base64url');
+
+      if (expectedChallenge !== authCodeData.codeChallenge) {
+        logger.warn(`PKCE validation failed`);
+        return { success: false, error: 'Invalid code_verifier' };
+      }
+      logger.info('PKCE validation successful');
     }
 
     // Mark code as used
