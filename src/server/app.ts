@@ -205,9 +205,16 @@ export function createApp(): Application {
   app.get('/auth/callback', async (req: Request, res: Response) => {
     const { code, state, error, error_description } = req.query;
 
-    const sessionId = req.cookies.tanda_session;
+    // Try to get sessionId from state parameter first (more reliable than cookies)
+    // This survives cross-site redirects where cookies may not be sent
+    let sessionId = state ? oauthManager.decodeStateSessionId(state as string) : null;
 
-    // Get client OAuth params from session (not cookies - more reliable)
+    // Fall back to cookie if state decoding fails
+    if (!sessionId) {
+      sessionId = req.cookies.tanda_session;
+    }
+
+    // Get client OAuth params from session
     const clientParams = sessionId ? oauthManager.getClientParams(sessionId) : null;
     const clientRedirectUri = clientParams?.redirectUri;
     const clientState = clientParams?.state;
@@ -247,7 +254,7 @@ export function createApp(): Application {
     if (!sessionId) {
       res.status(400).json({
         error: 'Bad Request',
-        message: 'No session cookie found. Please start the login flow again.',
+        message: 'Could not recover session from state. Please start the login flow again.',
       });
       return;
     }

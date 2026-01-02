@@ -70,16 +70,23 @@ export interface AuthResult {
 
 export class OAuthManager {
   // Generate a new OAuth state and session
+  // The state parameter encodes the sessionId so we can recover it from the callback
+  // without relying on cookies (which may not survive cross-site redirects)
   createAuthSession(clientParams?: {
     redirectUri?: string;
     state?: string;
     codeChallenge?: string;
   }): { sessionId: string; authUrl: string; state: string } {
     const sessionId = uuidv4();
-    const state = uuidv4();
+    const nonce = uuidv4();
+
+    // Encode sessionId in state so we can recover it from callback
+    // Format: base64url({ sid: sessionId, n: nonce })
+    const stateData = { sid: sessionId, n: nonce };
+    const state = Buffer.from(JSON.stringify(stateData)).toString('base64url');
 
     sessions.set(sessionId, {
-      state,
+      state,  // Store the full encoded state for verification
       createdAt: Date.now(),
       // Store client OAuth parameters for later retrieval
       clientRedirectUri: clientParams?.redirectUri,
@@ -91,6 +98,21 @@ export class OAuthManager {
     logger.info(`Created new OAuth session: ${sessionId}, clientRedirectUri: ${clientParams?.redirectUri}`);
 
     return { sessionId, authUrl, state };
+  }
+
+  // Decode sessionId from state parameter (for callback recovery)
+  decodeStateSessionId(state: string): string | null {
+    try {
+      const decoded = Buffer.from(state, 'base64url').toString('utf8');
+      const data = JSON.parse(decoded);
+      if (data.sid && typeof data.sid === 'string') {
+        return data.sid;
+      }
+      return null;
+    } catch (error) {
+      logger.debug('Failed to decode state:', error);
+      return null;
+    }
   }
 
   // Get client OAuth parameters from session
