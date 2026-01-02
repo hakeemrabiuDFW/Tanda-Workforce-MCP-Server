@@ -18,6 +18,25 @@ interface SessionData {
 
 const sessions = new Map<string, SessionData>();
 
+// Authorization code store (code -> sessionId mapping for OAuth2 flow)
+interface AuthCodeData {
+  sessionId: string;
+  createdAt: number;
+  used: boolean;
+}
+const authCodes = new Map<string, AuthCodeData>();
+
+// Auth code cleanup interval (codes expire after 10 minutes)
+const AUTH_CODE_TTL_MS = 10 * 60 * 1000; // 10 minutes
+setInterval(() => {
+  const now = Date.now();
+  for (const [code, data] of authCodes.entries()) {
+    if (now - data.createdAt > AUTH_CODE_TTL_MS) {
+      authCodes.delete(code);
+    }
+  }
+}, 60 * 1000); // Run every minute
+
 // Session cleanup interval (remove expired sessions)
 const SESSION_TTL_MS = 24 * 60 * 60 * 1000; // 24 hours
 setInterval(() => {
@@ -234,6 +253,58 @@ export class OAuthManager {
       activeSessions: sessions.size,
       oldestSession,
     };
+  }
+
+  // Generate an authorization code for OAuth2 flow (for Claude MCP)
+  generateAuthCode(sessionId: string): string {
+    const code = uuidv4();
+    authCodes.set(code, {
+      sessionId,
+      createdAt: Date.now(),
+      used: false,
+    });
+    logger.info(`Generated auth code for session: ${sessionId}`);
+    return code;
+  }
+
+  // Exchange authorization code for JWT (for Claude MCP /token endpoint)
+  exchangeAuthCode(code: string): { success: boolean; accessToken?: string; error?: string } {
+    const authCodeData = authCodes.get(code);
+
+    if (!authCodeData) {
+      logger.warn(`Auth code not found: ${code}`);
+      return { success: false, error: 'Invalid authorization code' };
+    }
+
+    if (authCodeData.used) {
+      logger.warn(`Auth code already used: ${code}`);
+      // Delete the code to prevent replay attacks
+      authCodes.delete(code);
+      return { success: false, error: 'Authorization code already used' };
+    }
+
+    // Check if code is expired (10 minutes)
+    if (Date.now() - authCodeData.createdAt > AUTH_CODE_TTL_MS) {
+      logger.warn(`Auth code expired: ${code}`);
+      authCodes.delete(code);
+      return { success: false, error: 'Authorization code expired' };
+    }
+
+    // Mark code as used
+    authCodeData.used = true;
+
+    // Get the session
+    const session = sessions.get(authCodeData.sessionId);
+    if (!session || !session.user) {
+      logger.warn(`Session not found for auth code: ${code}`);
+      return { success: false, error: 'Session not found' };
+    }
+
+    // Generate JWT for the client
+    const accessToken = this.generateJWT(authCodeData.sessionId, session.user);
+
+    logger.info(`Auth code exchanged for session: ${authCodeData.sessionId}`);
+    return { success: true, accessToken };
   }
 }
 

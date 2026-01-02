@@ -123,11 +123,33 @@ export function createApp(): Application {
   app.get('/authorize', (req: Request, res: Response) => {
     const { sessionId, authUrl } = oauthManager.createAuthSession();
 
-    // Store any client-provided state for later
+    // Capture OAuth2 parameters from Claude
+    const clientRedirectUri = req.query.redirect_uri as string;
     const clientState = req.query.state as string;
+    const codeChallenge = req.query.code_challenge as string;
+    const codeChallengeMethod = req.query.code_challenge_method as string;
+
+    // Store client OAuth parameters for callback
+    if (clientRedirectUri) {
+      res.cookie('client_redirect_uri', clientRedirectUri, {
+        httpOnly: true,
+        secure: config.NODE_ENV === 'production',
+        sameSite: 'lax',
+        maxAge: 10 * 60 * 1000, // 10 minutes
+      });
+    }
+
     if (clientState) {
-      // Store mapping of our session to client's state
       res.cookie('client_oauth_state', clientState, {
+        httpOnly: true,
+        secure: config.NODE_ENV === 'production',
+        sameSite: 'lax',
+        maxAge: 10 * 60 * 1000, // 10 minutes
+      });
+    }
+
+    if (codeChallenge) {
+      res.cookie('client_code_challenge', codeChallenge, {
         httpOnly: true,
         secure: config.NODE_ENV === 'production',
         sameSite: 'lax',
@@ -143,7 +165,7 @@ export function createApp(): Application {
       maxAge: 24 * 60 * 60 * 1000, // 24 hours
     });
 
-    logger.info(`OAuth authorize initiated, redirecting to Tanda`);
+    logger.info(`OAuth authorize initiated for redirect_uri: ${clientRedirectUri}, redirecting to Tanda`);
     res.redirect(authUrl);
   });
 
@@ -167,7 +189,8 @@ export function createApp(): Application {
       return;
     }
 
-    const result = await oauthManager.exchangeCodeForToken(code);
+    // Exchange our authorization code (not Tanda's) for a JWT
+    const result = oauthManager.exchangeAuthCode(code);
 
     if (!result.success) {
       res.status(400).json({
@@ -179,7 +202,7 @@ export function createApp(): Application {
 
     // Return OAuth2 standard token response
     res.json({
-      access_token: result.data?.jwt, // Use JWT as the access token for MCP
+      access_token: result.accessToken,
       token_type: 'Bearer',
       expires_in: 86400, // 24 hours
     });
@@ -205,8 +228,27 @@ export function createApp(): Application {
   app.get('/auth/callback', async (req: Request, res: Response) => {
     const { code, state, error, error_description } = req.query;
 
+    // Check if this is a Claude MCP OAuth flow (has client redirect_uri)
+    const clientRedirectUri = req.cookies.client_redirect_uri;
+    const clientState = req.cookies.client_oauth_state;
+
     if (error) {
       logger.error(`OAuth callback error: ${error} - ${error_description}`);
+
+      // If Claude flow, redirect back with error
+      if (clientRedirectUri) {
+        const errorUrl = new URL(clientRedirectUri);
+        errorUrl.searchParams.set('error', error as string);
+        if (error_description) {
+          errorUrl.searchParams.set('error_description', error_description as string);
+        }
+        if (clientState) {
+          errorUrl.searchParams.set('state', clientState);
+        }
+        res.redirect(errorUrl.toString());
+        return;
+      }
+
       res.status(400).json({
         error: 'OAuth Error',
         message: error_description || error,
@@ -238,6 +280,18 @@ export function createApp(): Application {
     );
 
     if (!result.success) {
+      // If Claude flow, redirect back with error
+      if (clientRedirectUri) {
+        const errorUrl = new URL(clientRedirectUri);
+        errorUrl.searchParams.set('error', 'access_denied');
+        errorUrl.searchParams.set('error_description', result.error || 'Authentication failed');
+        if (clientState) {
+          errorUrl.searchParams.set('state', clientState);
+        }
+        res.redirect(errorUrl.toString());
+        return;
+      }
+
       res.status(400).json({
         error: 'Authentication Failed',
         message: result.error,
@@ -245,8 +299,28 @@ export function createApp(): Application {
       return;
     }
 
-    // For browser-based flows, you might redirect to a frontend page
-    // For API clients, return the token directly
+    // If this is a Claude MCP OAuth flow, redirect back to Claude with auth code
+    if (clientRedirectUri) {
+      // Generate an authorization code for Claude to exchange
+      const authCode = oauthManager.generateAuthCode(sessionId);
+
+      const redirectUrl = new URL(clientRedirectUri);
+      redirectUrl.searchParams.set('code', authCode);
+      if (clientState) {
+        redirectUrl.searchParams.set('state', clientState);
+      }
+
+      // Clear the OAuth cookies
+      res.clearCookie('client_redirect_uri');
+      res.clearCookie('client_oauth_state');
+      res.clearCookie('client_code_challenge');
+
+      logger.info(`OAuth successful, redirecting to Claude: ${clientRedirectUri}`);
+      res.redirect(redirectUrl.toString());
+      return;
+    }
+
+    // For direct API clients, return the token as JSON
     res.json({
       success: true,
       token: result.token,
