@@ -113,10 +113,32 @@ export function createApp(): Application {
       issuer: baseUrl,
       authorization_endpoint: `${baseUrl}/authorize`,
       token_endpoint: `${baseUrl}/token`,
+      registration_endpoint: `${baseUrl}/oauth/register`,
       response_types_supported: ['code'],
       grant_types_supported: ['authorization_code'],
       code_challenge_methods_supported: ['S256'],
       token_endpoint_auth_methods_supported: ['none'],
+    });
+  });
+
+  // POST /oauth/register - Dynamic Client Registration (RFC 7591)
+  // Required for Claude.ai MCP integration
+  app.post('/oauth/register', (req: Request, res: Response) => {
+    const { redirect_uris, client_name, token_endpoint_auth_method } = req.body;
+
+    // Generate a client_id for this registration
+    const clientId = `mcp-client-${Date.now()}-${Math.random().toString(36).substring(7)}`;
+
+    logger.info(`Dynamic client registration: ${client_name}, redirect_uris: ${JSON.stringify(redirect_uris)}`);
+
+    // Return client credentials per RFC 7591
+    res.status(201).json({
+      client_id: clientId,
+      client_name: client_name || 'MCP Client',
+      redirect_uris: redirect_uris || [],
+      token_endpoint_auth_method: token_endpoint_auth_method || 'none',
+      grant_types: ['authorization_code'],
+      response_types: ['code'],
     });
   });
 
