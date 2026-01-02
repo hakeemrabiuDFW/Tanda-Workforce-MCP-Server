@@ -104,6 +104,9 @@ export function createApp(): Application {
     });
   });
 
+  // POST / - Handle MCP requests at root (Claude sends here after SSE connection)
+  app.post('/', optionalAuth, createMCPRouter());
+
   // ==================== OAuth Routes ====================
 
   // OAuth 2.0 Discovery endpoint (RFC 8414)
