@@ -83,6 +83,11 @@ export function createApp(): Application {
       description: 'Tanda Workforce MCP Server with OAuth2 authentication',
       endpoints: {
         health: '/health',
+        oauth: {
+          authorize: '/authorize',
+          token: '/token',
+          discovery: '/.well-known/oauth-authorization-server',
+        },
         auth: {
           login: '/auth/login',
           callback: '/auth/callback',
@@ -99,6 +104,86 @@ export function createApp(): Application {
   });
 
   // ==================== OAuth Routes ====================
+
+  // OAuth 2.0 Discovery endpoint (RFC 8414)
+  app.get('/.well-known/oauth-authorization-server', (req: Request, res: Response) => {
+    const baseUrl = `${req.protocol}://${req.get('host')}`;
+    res.json({
+      issuer: baseUrl,
+      authorization_endpoint: `${baseUrl}/authorize`,
+      token_endpoint: `${baseUrl}/token`,
+      response_types_supported: ['code'],
+      grant_types_supported: ['authorization_code'],
+      code_challenge_methods_supported: ['S256'],
+      token_endpoint_auth_methods_supported: ['none'],
+    });
+  });
+
+  // GET /authorize - Standard OAuth2 authorize endpoint (for Claude MCP)
+  app.get('/authorize', (req: Request, res: Response) => {
+    const { sessionId, authUrl } = oauthManager.createAuthSession();
+
+    // Store any client-provided state for later
+    const clientState = req.query.state as string;
+    if (clientState) {
+      // Store mapping of our session to client's state
+      res.cookie('client_oauth_state', clientState, {
+        httpOnly: true,
+        secure: config.NODE_ENV === 'production',
+        sameSite: 'lax',
+        maxAge: 10 * 60 * 1000, // 10 minutes
+      });
+    }
+
+    // Set session cookie
+    res.cookie('tanda_session', sessionId, {
+      httpOnly: true,
+      secure: config.NODE_ENV === 'production',
+      sameSite: 'lax',
+      maxAge: 24 * 60 * 60 * 1000, // 24 hours
+    });
+
+    logger.info(`OAuth authorize initiated, redirecting to Tanda`);
+    res.redirect(authUrl);
+  });
+
+  // POST /token - Standard OAuth2 token endpoint (for Claude MCP)
+  app.post('/token', async (req: Request, res: Response) => {
+    const { code, grant_type, code_verifier } = req.body;
+
+    if (grant_type !== 'authorization_code') {
+      res.status(400).json({
+        error: 'unsupported_grant_type',
+        error_description: 'Only authorization_code grant type is supported',
+      });
+      return;
+    }
+
+    if (!code) {
+      res.status(400).json({
+        error: 'invalid_request',
+        error_description: 'Authorization code is required',
+      });
+      return;
+    }
+
+    const result = await oauthManager.exchangeCodeForToken(code);
+
+    if (!result.success) {
+      res.status(400).json({
+        error: 'invalid_grant',
+        error_description: result.error,
+      });
+      return;
+    }
+
+    // Return OAuth2 standard token response
+    res.json({
+      access_token: result.data?.jwt, // Use JWT as the access token for MCP
+      token_type: 'Bearer',
+      expires_in: 86400, // 24 hours
+    });
+  });
 
   // GET /auth/login - Initiate OAuth flow
   app.get('/auth/login', (req: Request, res: Response) => {
