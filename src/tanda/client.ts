@@ -464,8 +464,8 @@ export async function exchangeCodeForToken(code: string): Promise<TandaTokenResp
 
 export function buildAuthorizationUrl(state: string, scope?: string): string {
   // Tanda requires the scope parameter - use provided scope or default to common scopes
-  // Available scopes: me, user, department, leave, roster, timesheet, cost, platform, sms, datastream, qualification, device
-  const defaultScopes = 'me user department leave roster timesheet cost qualification device';
+  // Note: qualification and device scopes are not supported by Workforce.com OAuth
+  const defaultScopes = 'me user department leave roster timesheet cost';
 
   const params = new URLSearchParams({
     client_id: config.TANDA_CLIENT_ID,
