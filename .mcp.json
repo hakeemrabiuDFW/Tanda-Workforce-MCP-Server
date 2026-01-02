@@ -1,0 +1,8 @@
+{
+  "mcpServers": {
+    "tanda-workforce": {
+      "type": "http",
+      "url": "https://tanda-workforce-mcp-server-production.up.railway.app/mcp"
+    }
+  }
+}
