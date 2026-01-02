@@ -402,16 +402,17 @@ export async function exchangeCodeForToken(code: string): Promise<TandaTokenResp
 }
 
 export function buildAuthorizationUrl(state: string, scope?: string): string {
+  // Tanda requires the scope parameter - use provided scope or default to common scopes
+  // Available scopes: user, department, leave, roster, timesheet, cost, platform, sms, datastream, qualification
+  const defaultScopes = 'user department leave roster timesheet cost';
+
   const params = new URLSearchParams({
     client_id: config.TANDA_CLIENT_ID,
     redirect_uri: config.TANDA_REDIRECT_URI,
     response_type: 'code',
     state,
+    scope: scope || defaultScopes,
   });
-
-  if (scope) {
-    params.append('scope', scope);
-  }
 
   return `${config.TANDA_AUTH_URL}?${params.toString()}`;
 }
