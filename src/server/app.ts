@@ -8,6 +8,7 @@ import { logger } from '../utils/logger';
 import { oauthManager } from '../auth/oauth';
 import { requireAuth, optionalAuth, errorHandler, extractBearerToken } from '../auth/middleware';
 import { createMCPRouter } from '../mcp/handler';
+import { exchangeCodeForToken, TandaClient } from '../tanda/client';
 
 export function createApp(): Application {
   const app = express();
@@ -243,20 +244,44 @@ export function createApp(): Application {
       return;
     }
 
-    if (!code || !state) {
+    if (!code) {
       res.status(400).json({
         error: 'Bad Request',
-        message: 'Missing code or state parameter',
+        message: 'Missing code parameter',
       });
       return;
     }
 
+    // If no state/session but we have code, this is a direct test from Workforce.com
+    // Exchange the code directly and show success
     if (!sessionId) {
-      res.status(400).json({
-        error: 'Bad Request',
-        message: 'Could not recover session from state. Please start the login flow again.',
-      });
-      return;
+      try {
+        const tokenResponse = await exchangeCodeForToken(code as string);
+        const tandaClient = new TandaClient(
+          tokenResponse.access_token,
+          tokenResponse.refresh_token,
+          tokenResponse.expires_in
+        );
+        const user = await tandaClient.getCurrentUser();
+
+        res.json({
+          success: true,
+          message: 'OAuth flow completed successfully (direct test)',
+          user: {
+            id: user.id,
+            name: user.name,
+            email: user.email,
+          },
+        });
+        return;
+      } catch (err) {
+        logger.error('Direct OAuth test failed:', err);
+        res.status(400).json({
+          error: 'Authentication Failed',
+          message: err instanceof Error ? err.message : 'Failed to exchange code for token',
+        });
+        return;
+      }
     }
 
     const result = await oauthManager.handleCallback(
