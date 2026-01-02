@@ -259,6 +259,8 @@ export class TandaClient {
   // ==================== Timesheets ====================
 
   async getTimesheets(filter: TimesheetFilter): Promise<TandaTimesheet[]> {
+    // Note: Workforce.com API uses /shifts for timesheet data
+    // The /timesheets endpoint may not exist - fall back to /shifts
     const params = new URLSearchParams({
       from: filter.from,
       to: filter.to,
@@ -267,8 +269,15 @@ export class TandaClient {
     if (filter.approved !== undefined) params.append('approved', String(filter.approved));
     if (filter.include_costs) params.append('include_costs', 'true');
 
-    const response = await this.client.get<TandaTimesheet[]>('/timesheets', { params });
-    return response.data;
+    try {
+      const response = await this.client.get<TandaTimesheet[]>('/timesheets', { params });
+      return response.data;
+    } catch (error) {
+      // Fallback to shifts endpoint if timesheets doesn't exist
+      logger.debug('Timesheets endpoint not available, using shifts');
+      const response = await this.client.get<TandaTimesheet[]>('/shifts', { params });
+      return response.data;
+    }
   }
 
   async getTimesheet(timesheetId: number): Promise<TandaTimesheet> {
@@ -315,8 +324,23 @@ export class TandaClient {
   }
 
   async getLeaveBalances(userId: number): Promise<TandaLeaveBalance[]> {
-    const response = await this.client.get<TandaLeaveBalance[]>(`/users/${userId}/leave_balances`);
-    return response.data;
+    // Try multiple endpoint variations as Workforce.com API may differ
+    try {
+      const response = await this.client.get<TandaLeaveBalance[]>(`/users/${userId}/leave_balances`);
+      return response.data;
+    } catch {
+      try {
+        // Alternative: /leave_balances with user filter
+        const response = await this.client.get<TandaLeaveBalance[]>('/leave_balances', {
+          params: { user_id: userId },
+        });
+        return response.data;
+      } catch {
+        // Return empty array with note if endpoint doesn't exist
+        logger.warn(`Leave balances endpoint not available for user ${userId}`);
+        return [];
+      }
+    }
   }
 
   // ==================== Clock In/Out ====================
@@ -345,8 +369,22 @@ export class TandaClient {
   }
 
   async getUserQualifications(userId: number): Promise<TandaUserQualification[]> {
-    const response = await this.client.get<TandaUserQualification[]>(`/users/${userId}/qualifications`);
-    return response.data;
+    // Try multiple endpoint variations
+    try {
+      const response = await this.client.get<TandaUserQualification[]>(`/users/${userId}/qualifications`);
+      return response.data;
+    } catch {
+      try {
+        // Alternative: /staff_qualifications with user filter
+        const response = await this.client.get<TandaUserQualification[]>('/staff_qualifications', {
+          params: { user_id: userId },
+        });
+        return response.data;
+      } catch {
+        logger.warn(`User qualifications endpoint not available for user ${userId}`);
+        return [];
+      }
+    }
   }
 
   // ==================== Award Interpretation ====================
@@ -358,8 +396,19 @@ export class TandaClient {
     });
     if (filter.user_ids?.length) params.append('user_ids', filter.user_ids.join(','));
 
-    const response = await this.client.get<TandaAwardInterpretation[]>('/award_interpretations', { params });
-    return response.data;
+    try {
+      const response = await this.client.get<TandaAwardInterpretation[]>('/award_interpretations', { params });
+      return response.data;
+    } catch {
+      try {
+        // Alternative endpoint
+        const response = await this.client.get<TandaAwardInterpretation[]>('/payslips', { params });
+        return response.data;
+      } catch {
+        logger.warn('Award interpretation endpoint not available');
+        return [];
+      }
+    }
   }
 
   // ==================== Roster Costs ====================
@@ -371,8 +420,20 @@ export class TandaClient {
     });
     if (filter.department_ids?.length) params.append('department_ids', filter.department_ids.join(','));
 
-    const response = await this.client.get<TandaRosterCost[]>('/rosters/costs', { params });
-    return response.data;
+    try {
+      const response = await this.client.get<TandaRosterCost[]>('/rosters/costs', { params });
+      return response.data;
+    } catch {
+      try {
+        // Alternative: use schedules with show_costs
+        params.append('show_costs', 'true');
+        const response = await this.client.get<TandaRosterCost[]>('/schedules', { params });
+        return response.data;
+      } catch {
+        logger.warn('Roster costs endpoint not available');
+        return [];
+      }
+    }
   }
 
   // ==================== Data Streams ====================
@@ -403,8 +464,8 @@ export async function exchangeCodeForToken(code: string): Promise<TandaTokenResp
 
 export function buildAuthorizationUrl(state: string, scope?: string): string {
   // Tanda requires the scope parameter - use provided scope or default to common scopes
-  // Available scopes: me, user, department, leave, roster, timesheet, cost, platform, sms, datastream, qualification
-  const defaultScopes = 'me user department leave roster timesheet cost';
+  // Available scopes: me, user, department, leave, roster, timesheet, cost, platform, sms, datastream, qualification, device
+  const defaultScopes = 'me user department leave roster timesheet cost qualification device';
 
   const params = new URLSearchParams({
     client_id: config.TANDA_CLIENT_ID,

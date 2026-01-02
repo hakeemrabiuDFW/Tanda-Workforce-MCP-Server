@@ -636,15 +636,22 @@ export async function executeTool(
         return { content: await client.approveTimesheet(args.timesheet_id as number) };
 
       // Leave Management
-      case 'tanda_get_leave_requests':
+      case 'tanda_get_leave_requests': {
+        // API requires at least one parameter, provide defaults if none given
+        const today = new Date();
+        const thirtyDaysAgo = new Date(today.getTime() - 30 * 24 * 60 * 60 * 1000);
+        const defaultFrom = thirtyDaysAgo.toISOString().split('T')[0];
+        const defaultTo = today.toISOString().split('T')[0];
+
         return {
           content: await client.getLeaveRequests({
-            from: args.from as string | undefined,
-            to: args.to as string | undefined,
+            from: (args.from as string | undefined) || defaultFrom,
+            to: (args.to as string | undefined) || defaultTo,
             user_ids: args.user_ids as number[] | undefined,
             status: args.status as string | undefined,
           }),
         };
+      }
 
       case 'tanda_create_leave_request':
         return {
