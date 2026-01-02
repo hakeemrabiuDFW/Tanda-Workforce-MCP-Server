@@ -471,19 +471,66 @@ export function createApp(): Application {
     res.setHeader('X-Accel-Buffering', 'no'); // Disable nginx buffering
     res.flushHeaders();
 
-    // Send initial connection event
-    res.write(`event: open\ndata: {"status":"connected"}\n\n`);
+    let connectionClosed = false;
+    let pingInterval: NodeJS.Timeout | null = null;
 
-    // Keep connection alive with periodic pings
-    const pingInterval = setInterval(() => {
-      res.write(`: ping\n\n`);
+    // Helper to safely write to the response
+    const safeWrite = (data: string): boolean => {
+      if (connectionClosed || res.writableEnded || res.destroyed) {
+        return false;
+      }
+      try {
+        res.write(data, (err) => {
+          if (err) {
+            logger.warn('SSE write error:', err.message);
+            cleanup();
+          }
+        });
+        return true;
+      } catch (err) {
+        logger.warn('SSE write exception:', err instanceof Error ? err.message : 'Unknown error');
+        cleanup();
+        return false;
+      }
+    };
+
+    // Cleanup function to clear interval and mark connection as closed
+    const cleanup = () => {
+      if (connectionClosed) return;
+      connectionClosed = true;
+      if (pingInterval) {
+        clearInterval(pingInterval);
+        pingInterval = null;
+      }
+      logger.info('SSE client disconnected');
+    };
+
+    // Send initial connection event
+    if (!safeWrite(`event: open\ndata: {"status":"connected"}\n\n`)) {
+      return;
+    }
+
+    // Keep connection alive with periodic pings (every 30 seconds)
+    pingInterval = setInterval(() => {
+      if (!safeWrite(`: ping\n\n`)) {
+        cleanup();
+      }
     }, 30000);
 
     // Handle client disconnect
-    req.on('close', () => {
-      clearInterval(pingInterval);
-      logger.info('SSE client disconnected');
+    req.on('close', cleanup);
+    req.on('error', (err) => {
+      logger.warn('SSE request error:', err.message);
+      cleanup();
     });
+
+    // Handle response errors
+    res.on('error', (err) => {
+      logger.warn('SSE response error:', err.message);
+      cleanup();
+    });
+
+    res.on('close', cleanup);
 
     logger.info('SSE client connected to /mcp');
   });
