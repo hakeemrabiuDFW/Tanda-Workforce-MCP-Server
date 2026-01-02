@@ -10,6 +10,7 @@
     "dev": "ts-node src/index.ts",
     "lint": "eslint src/**/*.ts",
     "test": "jest",
+    "test:integration": "ts-node scripts/test-user-flow.ts",
     "docker:build": "docker build -t tanda-mcp-server .",
     "docker:run": "docker run -p 3000:3000 --env-file .env tanda-mcp-server"
   },
