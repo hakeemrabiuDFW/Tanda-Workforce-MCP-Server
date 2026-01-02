@@ -276,10 +276,11 @@ export function createApp(): Application {
         });
         return;
       } catch (err) {
-        logger.error('Direct OAuth test failed:', err);
+        const errorMessage = err instanceof Error ? err.message : 'Failed to exchange code for token';
+        logger.error(`Direct OAuth test failed: ${errorMessage}`);
         res.status(400).json({
           error: 'Authentication Failed',
-          message: err instanceof Error ? err.message : 'Failed to exchange code for token',
+          message: errorMessage,
         });
         return;
       }
