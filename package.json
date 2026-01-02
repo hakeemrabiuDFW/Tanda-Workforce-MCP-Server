@@ -13,6 +13,7 @@
     "test:integration": "ts-node scripts/test-user-flow.ts",
     "test:claude": "ts-node scripts/test-claude-integration.ts",
     "test:tools": "ts-node scripts/test-all-tools.ts",
+    "test:auth": "ts-node scripts/test-authenticated-tools.ts",
     "docker:build": "docker build -t tanda-mcp-server .",
     "docker:run": "docker run -p 3000:3000 --env-file .env tanda-mcp-server"
   },
