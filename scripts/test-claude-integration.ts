@@ -176,7 +176,7 @@ function testMCPToolsList(): void {
   const d = data as { result?: { tools?: unknown[] } };
   assert(d.result !== undefined, 'Missing result');
   assert(Array.isArray(d.result!.tools), 'tools is not an array');
-  assert(d.result!.tools!.length === 25, `Expected 25 tools, got ${d.result!.tools!.length}`);
+  assert(d.result!.tools!.length === 27, `Expected 27 tools, got ${d.result!.tools!.length}`);
 }
 
 function testMCPToolsListContents(): void {
@@ -199,8 +199,8 @@ function testMCPToolsListContents(): void {
     'tanda_get_schedules',
     'tanda_get_timesheets',
     'tanda_get_leave_requests',
-    'tanda_clock_in',
-    'tanda_get_qualifications',
+    'tanda_get_unavailability',
+    'tanda_get_teams',
   ];
 
   for (const tool of requiredTools) {

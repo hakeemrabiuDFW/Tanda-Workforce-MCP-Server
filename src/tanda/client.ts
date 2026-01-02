@@ -11,15 +11,15 @@ import {
   TandaTimesheet,
   TandaLeaveRequest,
   TandaLeaveBalance,
-  TandaClockIn,
-  TandaQualification,
-  TandaUserQualification,
   TandaAwardInterpretation,
   TandaRosterCost,
+  TandaUnavailability,
+  TandaTeam,
+  TandaDailyStats,
   CreateScheduleRequest,
   UpdateScheduleRequest,
   CreateLeaveRequest,
-  ClockInRequest,
+  CreateUnavailabilityRequest,
   DateRangeFilter,
   ScheduleFilter,
   TimesheetFilter,
@@ -343,46 +343,136 @@ export class TandaClient {
     }
   }
 
-  // ==================== Clock In/Out ====================
+  // ==================== Unavailability ====================
 
-  async clockIn(data: ClockInRequest): Promise<TandaClockIn> {
-    const response = await this.client.post<TandaClockIn>('/clockins', data);
-    return response.data;
-  }
-
-  async getClockIns(filter: DateRangeFilter & { user_ids?: number[] }): Promise<TandaClockIn[]> {
+  async getUnavailability(filter: DateRangeFilter & { user_ids?: number[] }): Promise<TandaUnavailability[]> {
     const params = new URLSearchParams({
       from: filter.from,
       to: filter.to,
     });
     if (filter.user_ids?.length) params.append('user_ids', filter.user_ids.join(','));
 
-    const response = await this.client.get<TandaClockIn[]>('/clockins', { params });
-    return response.data;
-  }
-
-  // ==================== Qualifications ====================
-
-  async getQualifications(): Promise<TandaQualification[]> {
-    const response = await this.client.get<TandaQualification[]>('/qualifications');
-    return response.data;
-  }
-
-  async getUserQualifications(userId: number): Promise<TandaUserQualification[]> {
-    // Try multiple endpoint variations
     try {
-      const response = await this.client.get<TandaUserQualification[]>(`/users/${userId}/qualifications`);
+      const response = await this.client.get<TandaUnavailability[]>('/unavailabilities', { params });
+      return response.data;
+    } catch {
+      // Alternative endpoint name
+      try {
+        const response = await this.client.get<TandaUnavailability[]>('/unavailability', { params });
+        return response.data;
+      } catch {
+        logger.warn('Unavailability endpoint not available');
+        return [];
+      }
+    }
+  }
+
+  async createUnavailability(data: CreateUnavailabilityRequest): Promise<TandaUnavailability> {
+    const response = await this.client.post<TandaUnavailability>('/unavailabilities', data);
+    return response.data;
+  }
+
+  async deleteUnavailability(unavailabilityId: number): Promise<void> {
+    await this.client.delete(`/unavailabilities/${unavailabilityId}`);
+  }
+
+  // ==================== Teams ====================
+
+  async getTeams(): Promise<TandaTeam[]> {
+    try {
+      const response = await this.client.get<TandaTeam[]>('/teams');
+      return response.data;
+    } catch {
+      // Alternative: groups endpoint
+      try {
+        const response = await this.client.get<TandaTeam[]>('/groups');
+        return response.data;
+      } catch {
+        logger.warn('Teams endpoint not available');
+        return [];
+      }
+    }
+  }
+
+  async getTeam(teamId: number): Promise<TandaTeam> {
+    const response = await this.client.get<TandaTeam>(`/teams/${teamId}`);
+    return response.data;
+  }
+
+  // ==================== Staff by Department ====================
+
+  async getStaffByDepartment(departmentId: number): Promise<TandaUser[]> {
+    // Get users filtered by department
+    const response = await this.client.get<TandaUser[]>('/users', {
+      params: { department_ids: departmentId.toString() },
+    });
+    return response.data;
+  }
+
+  // ==================== Daily Stats ====================
+
+  async getDailyStats(filter: DateRangeFilter & { department_ids?: number[] }): Promise<TandaDailyStats[]> {
+    const params = new URLSearchParams({
+      from: filter.from,
+      to: filter.to,
+    });
+    if (filter.department_ids?.length) params.append('department_ids', filter.department_ids.join(','));
+
+    try {
+      // Try stats endpoint first
+      const response = await this.client.get<TandaDailyStats[]>('/stats/daily', { params });
       return response.data;
     } catch {
       try {
-        // Alternative: /staff_qualifications with user filter
-        const response = await this.client.get<TandaUserQualification[]>('/staff_qualifications', {
-          params: { user_id: userId },
-        });
+        // Alternative: reports endpoint
+        const response = await this.client.get<TandaDailyStats[]>('/reports/daily', { params });
         return response.data;
       } catch {
-        logger.warn(`User qualifications endpoint not available for user ${userId}`);
-        return [];
+        // Fall back to computing from schedules and shifts
+        logger.debug('Daily stats endpoint not available, computing from schedules');
+        const [schedules, shifts] = await Promise.all([
+          this.getSchedules({ ...filter }),
+          this.getShifts(filter),
+        ]);
+
+        // Aggregate by date
+        const statsByDate = new Map<string, TandaDailyStats>();
+
+        for (const schedule of schedules) {
+          const date = schedule.start.split('T')[0];
+          const existing = statsByDate.get(date) || {
+            date,
+            scheduled_hours: 0,
+            actual_hours: 0,
+            headcount: 0,
+          };
+          // Calculate scheduled hours
+          const start = new Date(schedule.start);
+          const finish = new Date(schedule.finish);
+          const hours = (finish.getTime() - start.getTime()) / (1000 * 60 * 60);
+          existing.scheduled_hours += hours;
+          existing.headcount += 1;
+          statsByDate.set(date, existing);
+        }
+
+        for (const shift of shifts) {
+          const date = shift.date;
+          const existing = statsByDate.get(date) || {
+            date,
+            scheduled_hours: 0,
+            actual_hours: 0,
+            headcount: 0,
+          };
+          if (shift.finish) {
+            const start = new Date(shift.start);
+            const finish = new Date(shift.finish);
+            const hours = (finish.getTime() - start.getTime()) / (1000 * 60 * 60);
+            existing.actual_hours += hours;
+          }
+          statsByDate.set(date, existing);
+        }
+
+        return Array.from(statsByDate.values()).sort((a, b) => a.date.localeCompare(b.date));
       }
     }
   }

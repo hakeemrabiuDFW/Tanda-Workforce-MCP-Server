@@ -401,41 +401,10 @@ export const tandaTools: MCPTool[] = [
     },
   },
 
-  // Clock In/Out
+  // Unavailability
   {
-    name: 'tanda_clock_in',
-    description: 'Clock in/out or start/end break for an employee',
-    inputSchema: {
-      type: 'object',
-      properties: {
-        user_id: {
-          type: 'number',
-          description: 'The user ID to clock in/out',
-        },
-        type: {
-          type: 'string',
-          enum: ['start', 'finish', 'break_start', 'break_finish'],
-          description: 'Type of clock action',
-        },
-        time: {
-          type: 'string',
-          description: 'Optional: specific time in ISO 8601 format (defaults to now)',
-        },
-        latitude: {
-          type: 'number',
-          description: 'Optional: GPS latitude',
-        },
-        longitude: {
-          type: 'number',
-          description: 'Optional: GPS longitude',
-        },
-      },
-      required: ['user_id', 'type'],
-    },
-  },
-  {
-    name: 'tanda_get_clock_ins',
-    description: 'Get clock in/out records for a date range',
+    name: 'tanda_get_unavailability',
+    description: 'Get staff unavailability records for a date range',
     inputSchema: {
       type: 'object',
       properties: {
@@ -456,28 +425,99 @@ export const tandaTools: MCPTool[] = [
       required: ['from', 'to'],
     },
   },
-
-  // Qualifications
   {
-    name: 'tanda_get_qualifications',
-    description: 'Get all qualification types defined in the organization',
-    inputSchema: {
-      type: 'object',
-      properties: {},
-    },
-  },
-  {
-    name: 'tanda_get_user_qualifications',
-    description: 'Get qualifications for a specific user',
+    name: 'tanda_create_unavailability',
+    description: 'Create an unavailability record for an employee',
     inputSchema: {
       type: 'object',
       properties: {
         user_id: {
           type: 'number',
-          description: 'The user ID to get qualifications for',
+          description: 'The user ID to mark as unavailable',
+        },
+        start: {
+          type: 'string',
+          description: 'Start date/time in ISO 8601 format',
+        },
+        finish: {
+          type: 'string',
+          description: 'End date/time in ISO 8601 format',
+        },
+        title: {
+          type: 'string',
+          description: 'Optional title/reason for unavailability',
+        },
+        repeating: {
+          type: 'boolean',
+          description: 'Whether this unavailability repeats',
         },
       },
-      required: ['user_id'],
+      required: ['user_id', 'start', 'finish'],
+    },
+  },
+  {
+    name: 'tanda_delete_unavailability',
+    description: 'Delete an unavailability record',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        unavailability_id: {
+          type: 'number',
+          description: 'The unavailability record ID to delete',
+        },
+      },
+      required: ['unavailability_id'],
+    },
+  },
+
+  // Teams
+  {
+    name: 'tanda_get_teams',
+    description: 'Get all teams/groups in the organization',
+    inputSchema: {
+      type: 'object',
+      properties: {},
+    },
+  },
+
+  // Staff by Department
+  {
+    name: 'tanda_get_staff_by_department',
+    description: 'Get all staff members in a specific department',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        department_id: {
+          type: 'number',
+          description: 'The department ID to get staff for',
+        },
+      },
+      required: ['department_id'],
+    },
+  },
+
+  // Daily Stats
+  {
+    name: 'tanda_get_daily_stats',
+    description: 'Get daily workforce statistics (hours, headcount) for a date range',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        from: {
+          type: 'string',
+          description: 'Start date in YYYY-MM-DD format',
+        },
+        to: {
+          type: 'string',
+          description: 'End date in YYYY-MM-DD format',
+        },
+        department_ids: {
+          type: 'array',
+          items: { type: 'number' },
+          description: 'Filter by department IDs',
+        },
+      },
+      required: ['from', 'to'],
     },
   },
 
@@ -679,33 +719,48 @@ export async function executeTool(
       case 'tanda_get_leave_balances':
         return { content: await client.getLeaveBalances(args.user_id as number) };
 
-      // Clock In/Out
-      case 'tanda_clock_in':
+      // Unavailability
+      case 'tanda_get_unavailability':
         return {
-          content: await client.clockIn({
-            user_id: args.user_id as number,
-            type: args.type as 'start' | 'finish' | 'break_start' | 'break_finish',
-            time: args.time as string | undefined,
-            latitude: args.latitude as number | undefined,
-            longitude: args.longitude as number | undefined,
-          }),
-        };
-
-      case 'tanda_get_clock_ins':
-        return {
-          content: await client.getClockIns({
+          content: await client.getUnavailability({
             from: args.from as string,
             to: args.to as string,
             user_ids: args.user_ids as number[] | undefined,
           }),
         };
 
-      // Qualifications
-      case 'tanda_get_qualifications':
-        return { content: await client.getQualifications() };
+      case 'tanda_create_unavailability':
+        return {
+          content: await client.createUnavailability({
+            user_id: args.user_id as number,
+            start: args.start as string,
+            finish: args.finish as string,
+            title: args.title as string | undefined,
+            repeating: args.repeating as boolean | undefined,
+          }),
+        };
 
-      case 'tanda_get_user_qualifications':
-        return { content: await client.getUserQualifications(args.user_id as number) };
+      case 'tanda_delete_unavailability':
+        await client.deleteUnavailability(args.unavailability_id as number);
+        return { content: { success: true, message: 'Unavailability deleted successfully' } };
+
+      // Teams
+      case 'tanda_get_teams':
+        return { content: await client.getTeams() };
+
+      // Staff by Department
+      case 'tanda_get_staff_by_department':
+        return { content: await client.getStaffByDepartment(args.department_id as number) };
+
+      // Daily Stats
+      case 'tanda_get_daily_stats':
+        return {
+          content: await client.getDailyStats({
+            from: args.from as string,
+            to: args.to as string,
+            department_ids: args.department_ids as number[] | undefined,
+          }),
+        };
 
       // Award Interpretation & Costs
       case 'tanda_get_award_interpretation':

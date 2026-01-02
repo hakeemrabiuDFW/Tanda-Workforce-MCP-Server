@@ -140,12 +140,17 @@ const toolTests = [
   { name: 'tanda_get_leave_requests', args: {} },
   { name: 'tanda_get_leave_balances', args: { user_id: 2057764 } },
 
-  // Clock In/Out (read operation)
-  { name: 'tanda_get_clock_ins', args: { from: lastWeek, to: today } },
+  // Unavailability
+  { name: 'tanda_get_unavailability', args: { from: lastWeek, to: today } },
 
-  // Qualifications
-  { name: 'tanda_get_qualifications', args: {} },
-  { name: 'tanda_get_user_qualifications', args: { user_id: 2057764 } },
+  // Teams
+  { name: 'tanda_get_teams', args: {} },
+
+  // Staff by Department (use department ID 1 as test)
+  { name: 'tanda_get_staff_by_department', args: { department_id: 1 } },
+
+  // Daily Stats
+  { name: 'tanda_get_daily_stats', args: { from: lastWeek, to: today } },
 
   // Costs
   { name: 'tanda_get_award_interpretation', args: { from: lastWeek, to: today } },
@@ -167,7 +172,8 @@ const writeToolTests = [
   { name: 'tanda_create_leave_request', args: { user_id: 2057764, leave_type: 'annual', start: nextWeek, finish: nextWeek, status: 'pending' }, skip: true },
   { name: 'tanda_approve_leave', args: { leave_id: 1 }, skip: true },
   { name: 'tanda_decline_leave', args: { leave_id: 1, reason: 'Test decline' }, skip: true },
-  { name: 'tanda_clock_in', args: { user_id: 2057764, type: 'start' }, skip: true },
+  { name: 'tanda_create_unavailability', args: { user_id: 2057764, start: `${nextWeek}T09:00:00Z`, finish: `${nextWeek}T17:00:00Z`, title: 'Test unavailability' }, skip: true },
+  { name: 'tanda_delete_unavailability', args: { unavailability_id: 999999 }, skip: true },
 ];
 
 async function runTests() {
