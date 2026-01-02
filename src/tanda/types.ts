@@ -190,6 +190,44 @@ export interface TandaRosterCost {
   total_hours: number;
 }
 
+export interface TandaUnavailability {
+  id: number;
+  user_id: number;
+  title?: string;
+  start: string;
+  finish: string;
+  repeating?: boolean;
+  repeating_info?: {
+    frequency: string;
+    interval?: number;
+    end_date?: string;
+  };
+  created_at?: string;
+  updated_at?: string;
+}
+
+export interface TandaTeam {
+  id: number;
+  name: string;
+  department_ids?: number[];
+  user_ids?: number[];
+  managers?: number[];
+  created_at?: string;
+  updated_at?: string;
+}
+
+export interface TandaDailyStats {
+  date: string;
+  department_id?: number;
+  scheduled_hours: number;
+  actual_hours: number;
+  scheduled_cost?: number;
+  actual_cost?: number;
+  overtime_hours?: number;
+  break_hours?: number;
+  headcount: number;
+}
+
 export interface TandaPagination {
   page: number;
   per_page: number;
@@ -230,13 +268,13 @@ export interface CreateLeaveRequest {
   reason?: string;
 }
 
-export interface ClockInRequest {
+export interface CreateUnavailabilityRequest {
   user_id: number;
-  type: 'start' | 'finish' | 'break_start' | 'break_finish';
-  time?: string;
-  latitude?: number;
-  longitude?: number;
-  photo?: string;
+  title?: string;
+  start: string;
+  finish: string;
+  repeating?: boolean;
+  repeating_frequency?: string;
 }
 
 export interface DateRangeFilter {

@@ -18,15 +18,15 @@ These test cases are designed to be run through Claude.ai after connecting to th
 ### Test 1.1: List Available Tools
 **Prompt**: "What Tanda tools are available?"
 
-**Expected**: Claude should list all 25 Tanda tools:
+**Expected**: Claude should list all 27 Tanda tools:
 - User tools (get_current_user, get_users, get_user)
 - Department/Location tools
 - Schedule tools (CRUD operations)
 - Shift/Timesheet tools
 - Leave management tools
-- Clock in/out tools
-- Qualification tools
-- Cost reporting tools
+- Unavailability tools
+- Teams & Staff tools
+- Daily Stats & Cost reporting tools
 
 ### Test 1.2: Tool Details
 **Prompt**: "Describe the tanda_get_timesheets tool and its parameters"
@@ -159,34 +159,42 @@ These test cases are designed to be run through Claude.ai after connecting to th
 
 ---
 
-## Test Suite 7: Clock In/Out
+## Test Suite 7: Unavailability
 
-### Test 7.1: View Clock Ins
-**Prompt**: "Show me clock in records for today"
+### Test 7.1: View Unavailability
+**Prompt**: "Show me staff unavailability for the next week"
 
-**Expected**: Returns clock in/out entries with timestamps
+**Expected**: Returns unavailability records with:
+- User assignments
+- Start/end dates
+- Reason/title (if provided)
 
-### Test 7.2: Clock In
-**Prompt**: "Clock me in now"
+### Test 7.2: Create Unavailability
+**Prompt**: "Mark me as unavailable tomorrow from 9am to 5pm"
 
-**Expected**: Creates clock in entry with current timestamp
+**Expected**: Creates unavailability record and returns confirmation
 
 ---
 
-## Test Suite 8: Qualifications
+## Test Suite 8: Teams & Staff
 
-### Test 8.1: List Qualifications
-**Prompt**: "What qualifications are tracked in the system?"
+### Test 8.1: List Teams
+**Prompt**: "What teams are in the organization?"
 
-**Expected**: Returns list of qualification types
+**Expected**: Returns list of teams with member info
 
-### Test 8.2: User Qualifications
-**Prompt**: "Show my qualifications and their expiry dates"
+### Test 8.2: Staff by Department
+**Prompt**: "Show me all staff in department [ID]"
 
-**Expected**: Returns user's qualifications with:
-- Qualification name
-- Status
-- Expiry date (if applicable)
+**Expected**: Returns list of users in the specified department
+
+### Test 8.3: Daily Stats
+**Prompt**: "Show me workforce statistics for this week"
+
+**Expected**: Returns daily stats with:
+- Scheduled hours
+- Actual hours
+- Headcount
 
 ---
 
@@ -230,11 +238,12 @@ These test cases are designed to be run through Claude.ai after connecting to th
 
 Run these prompts in sequence for a quick health check:
 
-1. "List all available Tanda tools" → Should show 25 tools
+1. "List all available Tanda tools" → Should show 27 tools
 2. "Get my current user profile" → Should return your user data
 3. "Show departments" → Should return organization structure
 4. "Get timesheets for the last 7 days" → Should return data or empty array
 5. "What are my leave balances?" → Should return balance information
+6. "Show workforce statistics for this week" → Should return daily stats
 
 ---
 
