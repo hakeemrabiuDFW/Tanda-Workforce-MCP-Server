@@ -14,6 +14,10 @@ interface SessionData {
   refreshToken?: string;
   tokenExpiresAt?: number;
   user?: TandaUser;
+  // Client OAuth parameters (for Claude MCP flow)
+  clientRedirectUri?: string;
+  clientState?: string;
+  clientCodeChallenge?: string;
 }
 
 const sessions = new Map<string, SessionData>();
@@ -66,19 +70,42 @@ export interface AuthResult {
 
 export class OAuthManager {
   // Generate a new OAuth state and session
-  createAuthSession(): { sessionId: string; authUrl: string } {
+  createAuthSession(clientParams?: {
+    redirectUri?: string;
+    state?: string;
+    codeChallenge?: string;
+  }): { sessionId: string; authUrl: string; state: string } {
     const sessionId = uuidv4();
     const state = uuidv4();
 
     sessions.set(sessionId, {
       state,
       createdAt: Date.now(),
+      // Store client OAuth parameters for later retrieval
+      clientRedirectUri: clientParams?.redirectUri,
+      clientState: clientParams?.state,
+      clientCodeChallenge: clientParams?.codeChallenge,
     });
 
     const authUrl = buildAuthorizationUrl(state);
-    logger.info(`Created new OAuth session: ${sessionId}`);
+    logger.info(`Created new OAuth session: ${sessionId}, clientRedirectUri: ${clientParams?.redirectUri}`);
 
-    return { sessionId, authUrl };
+    return { sessionId, authUrl, state };
+  }
+
+  // Get client OAuth parameters from session
+  getClientParams(sessionId: string): {
+    redirectUri?: string;
+    state?: string;
+    codeChallenge?: string;
+  } | null {
+    const session = sessions.get(sessionId);
+    if (!session) return null;
+    return {
+      redirectUri: session.clientRedirectUri,
+      state: session.clientState,
+      codeChallenge: session.clientCodeChallenge,
+    };
   }
 
   // Validate OAuth callback and exchange code for tokens

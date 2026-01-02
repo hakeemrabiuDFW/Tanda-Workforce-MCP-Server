@@ -121,43 +121,20 @@ export function createApp(): Application {
 
   // GET /authorize - Standard OAuth2 authorize endpoint (for Claude MCP)
   app.get('/authorize', (req: Request, res: Response) => {
-    const { sessionId, authUrl } = oauthManager.createAuthSession();
-
     // Capture OAuth2 parameters from Claude
     const clientRedirectUri = req.query.redirect_uri as string;
     const clientState = req.query.state as string;
     const codeChallenge = req.query.code_challenge as string;
-    const codeChallengeMethod = req.query.code_challenge_method as string;
 
-    // Store client OAuth parameters for callback
-    if (clientRedirectUri) {
-      res.cookie('client_redirect_uri', clientRedirectUri, {
-        httpOnly: true,
-        secure: config.NODE_ENV === 'production',
-        sameSite: 'lax',
-        maxAge: 10 * 60 * 1000, // 10 minutes
-      });
-    }
+    // Create session with client OAuth parameters stored server-side
+    // This avoids cookie issues with cross-site redirects
+    const { sessionId, authUrl } = oauthManager.createAuthSession({
+      redirectUri: clientRedirectUri,
+      state: clientState,
+      codeChallenge: codeChallenge,
+    });
 
-    if (clientState) {
-      res.cookie('client_oauth_state', clientState, {
-        httpOnly: true,
-        secure: config.NODE_ENV === 'production',
-        sameSite: 'lax',
-        maxAge: 10 * 60 * 1000, // 10 minutes
-      });
-    }
-
-    if (codeChallenge) {
-      res.cookie('client_code_challenge', codeChallenge, {
-        httpOnly: true,
-        secure: config.NODE_ENV === 'production',
-        sameSite: 'lax',
-        maxAge: 10 * 60 * 1000, // 10 minutes
-      });
-    }
-
-    // Set session cookie
+    // Set session cookie (this is same-site, so should work)
     res.cookie('tanda_session', sessionId, {
       httpOnly: true,
       secure: config.NODE_ENV === 'production',
@@ -165,7 +142,7 @@ export function createApp(): Application {
       maxAge: 24 * 60 * 60 * 1000, // 24 hours
     });
 
-    logger.info(`OAuth authorize initiated for redirect_uri: ${clientRedirectUri}, redirecting to Tanda`);
+    logger.info(`OAuth authorize initiated for redirect_uri: ${clientRedirectUri}, session: ${sessionId}`);
     res.redirect(authUrl);
   });
 
@@ -228,9 +205,12 @@ export function createApp(): Application {
   app.get('/auth/callback', async (req: Request, res: Response) => {
     const { code, state, error, error_description } = req.query;
 
-    // Check if this is a Claude MCP OAuth flow (has client redirect_uri)
-    const clientRedirectUri = req.cookies.client_redirect_uri;
-    const clientState = req.cookies.client_oauth_state;
+    const sessionId = req.cookies.tanda_session;
+
+    // Get client OAuth params from session (not cookies - more reliable)
+    const clientParams = sessionId ? oauthManager.getClientParams(sessionId) : null;
+    const clientRedirectUri = clientParams?.redirectUri;
+    const clientState = clientParams?.state;
 
     if (error) {
       logger.error(`OAuth callback error: ${error} - ${error_description}`);
@@ -264,7 +244,6 @@ export function createApp(): Application {
       return;
     }
 
-    const sessionId = req.cookies.tanda_session;
     if (!sessionId) {
       res.status(400).json({
         error: 'Bad Request',
@@ -309,11 +288,6 @@ export function createApp(): Application {
       if (clientState) {
         redirectUrl.searchParams.set('state', clientState);
       }
-
-      // Clear the OAuth cookies
-      res.clearCookie('client_redirect_uri');
-      res.clearCookie('client_oauth_state');
-      res.clearCookie('client_code_challenge');
 
       logger.info(`OAuth successful, redirecting to Claude: ${clientRedirectUri}`);
       res.redirect(redirectUrl.toString());
