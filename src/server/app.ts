@@ -437,6 +437,32 @@ export function createApp(): Application {
 
   // ==================== MCP Endpoint ====================
 
+  // GET /mcp - SSE endpoint for server-to-client messages (required for remote MCP)
+  app.get('/mcp', optionalAuth, (req: Request, res: Response) => {
+    // Set SSE headers
+    res.setHeader('Content-Type', 'text/event-stream');
+    res.setHeader('Cache-Control', 'no-cache');
+    res.setHeader('Connection', 'keep-alive');
+    res.setHeader('X-Accel-Buffering', 'no'); // Disable nginx buffering
+    res.flushHeaders();
+
+    // Send initial connection event
+    res.write(`event: open\ndata: {"status":"connected"}\n\n`);
+
+    // Keep connection alive with periodic pings
+    const pingInterval = setInterval(() => {
+      res.write(`: ping\n\n`);
+    }, 30000);
+
+    // Handle client disconnect
+    req.on('close', () => {
+      clearInterval(pingInterval);
+      logger.info('SSE client disconnected');
+    });
+
+    logger.info('SSE client connected to /mcp');
+  });
+
   // POST /mcp - MCP protocol endpoint (authentication optional for initialize/list)
   app.post('/mcp', optionalAuth, createMCPRouter());
 
