@@ -1,6 +1,6 @@
 # Tanda Workforce MCP Server - Deployment Guide
 
-This guide covers deploying the Tanda Workforce MCP Server with OAuth2 authentication.
+This guide covers deploying the Tanda Workforce MCP Server with OAuth2 authentication for use with Claude.ai and Claude Desktop.
 
 ## Table of Contents
 
@@ -8,7 +8,8 @@ This guide covers deploying the Tanda Workforce MCP Server with OAuth2 authentic
 - [Prerequisites](#prerequisites)
 - [OAuth Setup with Tanda](#oauth-setup-with-tanda)
 - [Deployment Options](#deployment-options)
-- [Adding to Claude](#adding-to-claude)
+- [Connecting Claude](#connecting-claude)
+- [Team Member Setup](#team-member-setup)
 - [Testing Procedures](#testing-procedures)
 - [Troubleshooting](#troubleshooting)
 
@@ -17,24 +18,51 @@ This guide covers deploying the Tanda Workforce MCP Server with OAuth2 authentic
 ## Overview
 
 The Tanda Workforce MCP Server provides:
-- OAuth2 authentication with Tanda Workforce
+- OAuth2 authentication with Tanda Workforce (including PKCE support)
+- Dynamic Client Registration (RFC 7591) for Claude.ai
+- OAuth Discovery (RFC 8414) for automatic endpoint detection
+- SSE real-time transport for MCP communication
 - MCP (Model Context Protocol) endpoint for AI integrations
 - Full Tanda API access for workforce management operations
 
 ### Server Endpoints
 
+#### Core Endpoints
+
 | Endpoint | Method | Description |
 |----------|--------|-------------|
-| `/` | GET | Server info |
+| `/` | GET | Server info and endpoint listing |
+| `/` | POST | MCP protocol endpoint (Claude compatibility) |
 | `/health` | GET | Health check |
 | `/docs` | GET | API documentation |
-| `/auth/login` | GET | Start OAuth flow |
-| `/auth/callback` | GET | OAuth callback |
-| `/auth/status` | GET | Check auth status |
-| `/auth/logout` | POST | Logout |
-| `/api/authenticate` | POST | Exchange code for token |
+| `/stats` | GET | Server statistics and session info |
+
+#### OAuth 2.0 Endpoints (RFC Compliant)
+
+| Endpoint | Method | Description |
+|----------|--------|-------------|
+| `/.well-known/oauth-authorization-server` | GET | OAuth discovery (RFC 8414) |
+| `/oauth/register` | POST | Dynamic Client Registration (RFC 7591) |
+| `/authorize` | GET | OAuth2 authorization endpoint |
+| `/token` | POST | OAuth2 token endpoint (supports PKCE) |
+
+#### Authentication Endpoints
+
+| Endpoint | Method | Description |
+|----------|--------|-------------|
+| `/auth/login` | GET | Start OAuth flow (browser) |
+| `/auth/callback` | GET | OAuth callback handler |
+| `/auth/status` | GET | Check authentication status |
+| `/auth/logout` | POST | Logout and invalidate session |
+| `/api/authenticate` | POST | Exchange code for JWT token |
 | `/api/me` | GET | Get current user (protected) |
-| `/mcp` | POST | MCP protocol endpoint |
+
+#### MCP Endpoints
+
+| Endpoint | Method | Description |
+|----------|--------|-------------|
+| `/mcp` | GET | SSE endpoint for real-time transport |
+| `/mcp` | POST | MCP JSON-RPC 2.0 protocol endpoint |
 
 ---
 
@@ -76,8 +104,8 @@ TANDA_CLIENT_SECRET=your_client_secret_here
 TANDA_REDIRECT_URI=https://your-domain.com/auth/callback
 
 # Security (generate secure random strings for production)
-SESSION_SECRET=$(openssl rand -hex 32)
-JWT_SECRET=$(openssl rand -hex 32)
+SESSION_SECRET=your_32_character_minimum_secret_here
+JWT_SECRET=your_32_character_minimum_secret_here
 ```
 
 Generate secure secrets:
@@ -164,13 +192,34 @@ gcloud run deploy tanda-mcp-server \
 
 These platforms auto-detect the Dockerfile. Set environment variables in their dashboard.
 
+For Railway, the server auto-detects `RAILWAY_PUBLIC_DOMAIN` to construct redirect URIs.
+
 ---
 
-## Adding to Claude
+## Connecting Claude
 
-### URL Format for Claude Desktop
+### Claude.ai (OAuth Flow)
 
-Add the MCP server to your Claude configuration file:
+Claude.ai uses the full OAuth 2.0 flow with automatic discovery:
+
+1. **Add MCP Server**: In Claude.ai settings, add your MCP server URL:
+   ```
+   https://your-domain.com/mcp
+   ```
+
+2. **OAuth Flow**: Claude.ai automatically:
+   - Fetches `/.well-known/oauth-authorization-server` for endpoint discovery
+   - Registers via `/oauth/register` (Dynamic Client Registration)
+   - Initiates OAuth with PKCE via `/authorize`
+   - Exchanges code for token via `/token`
+   - Connects via SSE to `/mcp`
+
+3. **Authenticate**: You'll be redirected to Tanda to log in
+4. **Use Tools**: Once authenticated, all 25+ tools are available
+
+### Claude Desktop (JWT Token)
+
+Add to your Claude Desktop config file:
 
 **macOS**: `~/Library/Application Support/Claude/claude_desktop_config.json`
 **Windows**: `%APPDATA%\Claude\claude_desktop_config.json`
@@ -197,25 +246,36 @@ Add the MCP server to your Claude configuration file:
 
 2. **API Flow**:
    ```bash
-   # Get authorization URL
-   TANDA_AUTH_URL="https://my.tanda.co/api/oauth/authorize?client_id=YOUR_CLIENT_ID&redirect_uri=YOUR_REDIRECT_URI&response_type=code"
-
    # After user authenticates and you receive the code:
    curl -X POST https://your-domain.com/api/authenticate \
      -H "Content-Type: application/json" \
      -d '{"code": "AUTHORIZATION_CODE"}'
    ```
 
-### Claude URL Configuration Format
+---
 
-```
-https://your-domain.com/mcp
-```
+## Team Member Setup
 
-With authentication header:
-```
-Authorization: Bearer <jwt_token>
-```
+The MCP server supports multiple team members connecting simultaneously:
+
+### How It Works
+
+1. **Individual Authentication**: Each team member authenticates with their own Tanda credentials
+2. **Separate Sessions**: Each person gets their own session and JWT token
+3. **Permission-Based Access**: Tool access depends on each user's Tanda permissions
+4. **Shared Server**: All team members connect to the same MCP server URL
+
+### Setup for Team Members
+
+1. Share the MCP server URL with your team
+2. Each member follows the authentication steps above
+3. Each member uses their own JWT token (for Claude Desktop) or authenticates via OAuth (for Claude.ai)
+
+### Production Considerations
+
+- **Session Storage**: Default in-memory storage works for single-instance deployments
+- **Multiple Instances**: For load-balanced deployments, implement Redis or database session storage
+- **Token Expiry**: JWT tokens expire after 24 hours by default (configurable via `JWT_EXPIRY`)
 
 ---
 
@@ -236,17 +296,50 @@ Expected response:
 }
 ```
 
-### 2. OAuth Flow Test
+### 2. OAuth Discovery
 
 ```bash
-# Start OAuth flow (browser)
-open https://your-domain.com/auth/login
-
-# Or get auth URL programmatically
-curl https://your-domain.com/
+curl https://your-domain.com/.well-known/oauth-authorization-server
 ```
 
-### 3. MCP Protocol Test
+Expected response:
+```json
+{
+  "issuer": "https://your-domain.com",
+  "authorization_endpoint": "https://your-domain.com/authorize",
+  "token_endpoint": "https://your-domain.com/token",
+  "registration_endpoint": "https://your-domain.com/oauth/register",
+  "response_types_supported": ["code"],
+  "grant_types_supported": ["authorization_code"],
+  "code_challenge_methods_supported": ["S256"],
+  "token_endpoint_auth_methods_supported": ["none"]
+}
+```
+
+### 3. Dynamic Client Registration
+
+```bash
+curl -X POST https://your-domain.com/oauth/register \
+  -H "Content-Type: application/json" \
+  -d '{
+    "client_name": "Test Client",
+    "redirect_uris": ["https://example.com/callback"]
+  }'
+```
+
+Expected response:
+```json
+{
+  "client_id": "mcp-client-1234567890-abc123",
+  "client_name": "Test Client",
+  "redirect_uris": ["https://example.com/callback"],
+  "token_endpoint_auth_method": "none",
+  "grant_types": ["authorization_code"],
+  "response_types": ["code"]
+}
+```
+
+### 4. MCP Protocol Test
 
 ```bash
 # Initialize
@@ -256,7 +349,11 @@ curl -X POST https://your-domain.com/mcp \
     "jsonrpc": "2.0",
     "id": 1,
     "method": "initialize",
-    "params": {}
+    "params": {
+      "protocolVersion": "2024-11-05",
+      "clientInfo": { "name": "test", "version": "1.0" },
+      "capabilities": {}
+    }
   }'
 
 # List tools
@@ -283,10 +380,17 @@ curl -X POST https://your-domain.com/mcp \
   }'
 ```
 
-### 4. Full Integration Test
+### 5. SSE Connection Test
 
 ```bash
-# Test script
+# Test SSE endpoint (will receive events)
+curl -N https://your-domain.com/mcp \
+  -H "Accept: text/event-stream"
+```
+
+### 6. Full Integration Test
+
+```bash
 #!/bin/bash
 BASE_URL="https://your-domain.com"
 TOKEN="your_jwt_token"
@@ -294,10 +398,18 @@ TOKEN="your_jwt_token"
 echo "Testing health..."
 curl -s "$BASE_URL/health" | jq .
 
+echo "Testing OAuth discovery..."
+curl -s "$BASE_URL/.well-known/oauth-authorization-server" | jq .
+
 echo "Testing MCP initialize..."
 curl -s -X POST "$BASE_URL/mcp" \
   -H "Content-Type: application/json" \
-  -d '{"jsonrpc":"2.0","id":1,"method":"initialize"}' | jq .
+  -d '{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"protocolVersion":"2024-11-05","clientInfo":{"name":"test","version":"1.0"},"capabilities":{}}}' | jq .
+
+echo "Testing MCP tools/list..."
+curl -s -X POST "$BASE_URL/mcp" \
+  -H "Content-Type: application/json" \
+  -d '{"jsonrpc":"2.0","id":2,"method":"tools/list"}' | jq .
 
 echo "Testing authenticated endpoint..."
 curl -s "$BASE_URL/api/me" \
@@ -307,7 +419,7 @@ echo "Testing MCP tool call..."
 curl -s -X POST "$BASE_URL/mcp" \
   -H "Content-Type: application/json" \
   -H "Authorization: Bearer $TOKEN" \
-  -d '{"jsonrpc":"2.0","id":2,"method":"tools/call","params":{"name":"tanda_get_departments","arguments":{}}}' | jq .
+  -d '{"jsonrpc":"2.0","id":3,"method":"tools/call","params":{"name":"tanda_get_departments","arguments":{}}}' | jq .
 ```
 
 ---
@@ -318,6 +430,7 @@ curl -s -X POST "$BASE_URL/mcp" \
 |------|-------------|
 | `tanda_get_current_user` | Get authenticated user's profile |
 | `tanda_get_users` | List all users/employees |
+| `tanda_get_user` | Get specific user by ID |
 | `tanda_get_departments` | List all departments |
 | `tanda_get_locations` | List all locations |
 | `tanda_get_schedules` | Get scheduled shifts |
@@ -349,16 +462,27 @@ curl -s -X POST "$BASE_URL/mcp" \
 
 #### "Invalid or expired session"
 - The OAuth session has expired. Start a new login flow at `/auth/login`
+- Sessions expire after 24 hours by default
 
 #### "Authentication required"
 - Include the JWT token in the Authorization header: `Bearer <token>`
+- For Claude.ai, re-authenticate via the OAuth flow
 
 #### "State mismatch"
 - The OAuth state doesn't match. This could indicate a CSRF attempt or cookies not being saved properly
+- The server now encodes session ID in state to survive cross-site redirects
 
 #### "Token exchange failed"
 - Verify your `TANDA_CLIENT_ID` and `TANDA_CLIENT_SECRET` are correct
 - Ensure `TANDA_REDIRECT_URI` matches exactly what's configured in Tanda
+
+#### "PKCE validation failed"
+- Ensure the code_verifier matches the code_challenge sent during authorization
+- Only S256 method is supported
+
+#### SSE Connection Issues
+- Ensure your reverse proxy (nginx, etc.) has buffering disabled
+- Check that `X-Accel-Buffering: no` header is respected
 
 ### Logs
 
@@ -389,6 +513,7 @@ NODE_ENV=development npm run dev
 5. **Use secure cookie settings** (automatic in production)
 6. **Store secrets** in environment variables or secret managers
 7. **Monitor** the `/stats` endpoint for unusual activity
+8. **Implement session storage** (Redis) for multi-instance deployments
 
 ---
 
