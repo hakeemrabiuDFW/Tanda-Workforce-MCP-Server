@@ -168,7 +168,8 @@ export function createApp(): Application {
     }
 
     // Exchange our authorization code (not Tanda's) for a JWT
-    const result = oauthManager.exchangeAuthCode(code);
+    // Pass code_verifier for PKCE validation
+    const result = oauthManager.exchangeAuthCode(code, code_verifier);
 
     if (!result.success) {
       res.status(400).json({
@@ -314,8 +315,9 @@ export function createApp(): Application {
 
     // If this is a Claude MCP OAuth flow, redirect back to Claude with auth code
     if (clientRedirectUri) {
-      // Generate an authorization code for Claude to exchange
-      const authCode = oauthManager.generateAuthCode(sessionId);
+      // Generate an authorization code for Claude to exchange (include code_challenge for PKCE)
+      const clientCodeChallenge = clientParams?.codeChallenge;
+      const authCode = oauthManager.generateAuthCode(sessionId, clientCodeChallenge);
 
       const redirectUrl = new URL(clientRedirectUri);
       redirectUrl.searchParams.set('code', authCode);
