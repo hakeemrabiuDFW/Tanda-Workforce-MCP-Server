@@ -283,7 +283,7 @@ export class TandaClient {
 
   // ==================== Leave ====================
 
-  async getLeaveRequests(filter?: DateRangeFilter & { user_ids?: number[]; status?: string }): Promise<TandaLeaveRequest[]> {
+  async getLeaveRequests(filter?: Partial<DateRangeFilter> & { user_ids?: number[]; status?: string }): Promise<TandaLeaveRequest[]> {
     const params = new URLSearchParams();
     if (filter?.from) params.append('from', filter.from);
     if (filter?.to) params.append('to', filter.to);

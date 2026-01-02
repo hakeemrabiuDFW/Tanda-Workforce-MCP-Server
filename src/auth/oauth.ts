@@ -179,7 +179,7 @@ export class OAuthManager {
 
     return jwt.sign(payload, config.JWT_SECRET, {
       expiresIn: config.JWT_EXPIRY,
-    });
+    } as jwt.SignOptions);
   }
 
   // Verify JWT and return session
