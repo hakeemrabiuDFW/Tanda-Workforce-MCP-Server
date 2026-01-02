@@ -1,0 +1,24 @@
+{
+  "mcpServers": {
+    "tanda-workforce": {
+      "type": "http",
+      "url": "https://your-railway-domain.up.railway.app/mcp",
+      "description": "Tanda Workforce MCP Server - manages schedules, timesheets, leave, and users"
+    },
+    "github": {
+      "type": "stdio",
+      "command": "npx",
+      "args": ["-y", "@modelcontextprotocol/server-github"],
+      "env": {
+        "GITHUB_PERSONAL_ACCESS_TOKEN": "${GITHUB_TOKEN}"
+      },
+      "description": "GitHub integration for PR management"
+    },
+    "filesystem": {
+      "type": "stdio",
+      "command": "npx",
+      "args": ["-y", "@modelcontextprotocol/server-filesystem", "/home/user/Tanda-Workforce-MCP-Server"],
+      "description": "File system access for the project"
+    }
+  }
+}
