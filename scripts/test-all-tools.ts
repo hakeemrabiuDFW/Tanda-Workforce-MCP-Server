@@ -13,6 +13,7 @@ import { execSync } from 'child_process';
 
 const BASE_URL = process.argv[2] || 'https://tanda-workforce-mcp-server-production.up.railway.app';
 const JWT_TOKEN = process.argv[3] || '';
+const RUN_WRITE_TESTS = process.argv[4] === '--write' || process.argv[4] === '-w';
 
 interface ToolTestResult {
   tool: string;
@@ -152,16 +153,20 @@ const toolTests = [
 ];
 
 // Write operations (test separately as they modify data)
+// Note: Many write operations will return API errors due to:
+// - Invalid IDs (schedule_id: 1 doesn't exist)
+// - Missing OAuth scopes (device, qualification)
+// - Endpoint not available in Workforce.com API
 const writeToolTests = [
-  { name: 'tanda_create_schedule', args: { start: `${nextWeek}T09:00:00`, finish: `${nextWeek}T17:00:00` }, skip: true },
-  { name: 'tanda_update_schedule', args: { schedule_id: 1 }, skip: true },
+  { name: 'tanda_create_schedule', args: { user_id: 2057764, start: `${nextWeek}T09:00:00Z`, finish: `${nextWeek}T17:00:00Z` }, skip: true },
+  { name: 'tanda_update_schedule', args: { schedule_id: 1, notes: 'Updated by test' }, skip: true },
   { name: 'tanda_delete_schedule', args: { schedule_id: 999999 }, skip: true },
-  { name: 'tanda_publish_schedules', args: { from: today, to: nextWeek }, skip: true },
+  { name: 'tanda_publish_schedules', args: { from: today, to: nextWeek, department_ids: [] }, skip: true },
   { name: 'tanda_approve_shift', args: { shift_id: 1 }, skip: true },
   { name: 'tanda_approve_timesheet', args: { timesheet_id: 1 }, skip: true },
-  { name: 'tanda_create_leave_request', args: { user_id: 2057764, leave_type: 'annual', start: nextWeek, finish: nextWeek }, skip: true },
+  { name: 'tanda_create_leave_request', args: { user_id: 2057764, leave_type: 'annual', start: nextWeek, finish: nextWeek, status: 'pending' }, skip: true },
   { name: 'tanda_approve_leave', args: { leave_id: 1 }, skip: true },
-  { name: 'tanda_decline_leave', args: { leave_id: 1 }, skip: true },
+  { name: 'tanda_decline_leave', args: { leave_id: 1, reason: 'Test decline' }, skip: true },
   { name: 'tanda_clock_in', args: { user_id: 2057764, type: 'start' }, skip: true },
 ];
 
@@ -188,16 +193,27 @@ async function runTests() {
   }
 
   console.log('\n━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━');
-  console.log('✏️  WRITE OPERATIONS (Skipped by default - modify data)');
+  console.log(`✏️  WRITE OPERATIONS ${RUN_WRITE_TESTS ? '(ENABLED - will modify data!)' : '(Skipped - use --write to enable)'}`);
   console.log('━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n');
 
   for (const test of writeToolTests) {
-    console.log(`⏭️  ${test.name}: Skipped (write operation)`);
-    results.push({
-      tool: test.name,
-      status: 'passed',
-      message: 'Skipped (write operation)',
-    });
+    if (RUN_WRITE_TESTS) {
+      const result = testTool(test.name, test.args);
+      results.push(result);
+
+      const icon = result.status === 'passed' ? '✅' :
+                   result.status === 'auth_required' ? '🔒' :
+                   result.status === 'api_error' ? '⚠️' : '❌';
+
+      console.log(`${icon} ${test.name}: ${result.message}${result.error ? ` - ${result.error.substring(0, 50)}` : ''}`);
+    } else {
+      console.log(`⏭️  ${test.name}: Skipped (use --write to enable)`);
+      results.push({
+        tool: test.name,
+        status: 'passed',
+        message: 'Skipped (write operation)',
+      });
+    }
   }
 
   // Summary
