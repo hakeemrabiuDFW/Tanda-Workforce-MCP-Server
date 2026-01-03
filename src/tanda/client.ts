@@ -350,6 +350,10 @@ export class TandaClient {
     return response.data;
   }
 
+  async deleteLeaveRequest(leaveId: number): Promise<void> {
+    await this.client.delete(`/leave/${leaveId}`);
+  }
+
   async getLeaveBalances(userId: number): Promise<TandaLeaveBalance[]> {
     // Tanda API: GET /leave_balances?user_ids= (requires 'leave' scope)
     try {

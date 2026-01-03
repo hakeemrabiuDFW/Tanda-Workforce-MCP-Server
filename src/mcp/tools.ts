@@ -350,6 +350,11 @@ export const tandaTools: MCPTool[] = [
           type: 'string',
           description: 'Optional reason for leave',
         },
+        status: {
+          type: 'string',
+          enum: ['pending', 'approved'],
+          description: 'Leave request status (defaults to pending)',
+        },
       },
       required: ['user_id', 'leave_type', 'start', 'finish'],
     },
@@ -381,6 +386,20 @@ export const tandaTools: MCPTool[] = [
         reason: {
           type: 'string',
           description: 'Optional reason for declining',
+        },
+      },
+      required: ['leave_id'],
+    },
+  },
+  {
+    name: 'tanda_delete_leave_request',
+    description: 'Delete a leave request (use to clean up test data or cancel pending requests)',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        leave_id: {
+          type: 'number',
+          description: 'The leave request ID to delete',
         },
       },
       required: ['leave_id'],
@@ -702,6 +721,7 @@ export async function executeTool(
             finish: args.finish as string,
             hours: args.hours as number | undefined,
             reason: args.reason as string | undefined,
+            status: (args.status as 'pending' | 'approved' | undefined) || 'pending',
           }),
         };
 
@@ -715,6 +735,10 @@ export async function executeTool(
             args.reason as string | undefined
           ),
         };
+
+      case 'tanda_delete_leave_request':
+        await client.deleteLeaveRequest(args.leave_id as number);
+        return { content: { success: true, message: 'Leave request deleted successfully' } };
 
       case 'tanda_get_leave_balances':
         return { content: await client.getLeaveBalances(args.user_id as number) };
