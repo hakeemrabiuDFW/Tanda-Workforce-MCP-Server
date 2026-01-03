@@ -27,6 +27,17 @@ import {
   ScheduleFilter,
   TimesheetFilter,
   UserFilter,
+  // v3.0 New Types
+  TandaActiveShift,
+  TandaRoster,
+  TandaLeaveType,
+  TandaLeaveHoursResult,
+  TandaShiftBreak,
+  TandaShiftLimits,
+  OnboardUserRequest,
+  TandaOnboardingResult,
+  TandaBulkOnboardingResult,
+  TandaUserInviteResult,
 } from './types';
 
 export class TandaApiError extends Error {
@@ -666,6 +677,154 @@ export class TandaClient {
 
   // Note: Clock In/Out and Qualifications methods removed - require OAuth scopes not supported by Workforce.com
   // See docs/FIT_GAP_ANALYSIS.md for details on OAuth scope limitations
+
+  // ==================== v3.0 New Methods ====================
+
+  // ==================== Active Shifts (Real-time) ====================
+
+  async getActiveShifts(): Promise<TandaActiveShift[]> {
+    // GET /shifts/active - requires timesheet scope
+    try {
+      const response = await this.client.get<TandaActiveShift[]>('/shifts/active');
+      return response.data;
+    } catch (error) {
+      logger.warn('Active shifts endpoint not available:', error instanceof Error ? error.message : 'Unknown error');
+      return [];
+    }
+  }
+
+  async getClockedInUsers(): Promise<TandaUser[]> {
+    // GET /users/clocked_in - requires user scope
+    try {
+      const response = await this.client.get<TandaUser[]>('/users/clocked_in');
+      return response.data;
+    } catch (error) {
+      logger.warn('Clocked-in users endpoint not available:', error instanceof Error ? error.message : 'Unknown error');
+      return [];
+    }
+  }
+
+  async getShiftBreaks(shiftId: number): Promise<TandaShiftBreak[]> {
+    // GET /shifts/{id}/breaks - requires timesheet scope
+    try {
+      const response = await this.client.get<TandaShiftBreak[]>(`/shifts/${shiftId}/breaks`);
+      return response.data;
+    } catch (error) {
+      logger.warn(`Shift breaks not available for shift ${shiftId}:`, error instanceof Error ? error.message : 'Unknown error');
+      return [];
+    }
+  }
+
+  async getShiftLimits(userIds?: number[]): Promise<TandaShiftLimits[]> {
+    // GET /shifts/limits - requires timesheet scope
+    try {
+      const params = new URLSearchParams();
+      if (userIds?.length) params.append('user_ids', userIds.join(','));
+
+      const response = await this.client.get<TandaShiftLimits[]>('/shifts/limits', { params });
+      return response.data;
+    } catch (error) {
+      logger.warn('Shift limits endpoint not available:', error instanceof Error ? error.message : 'Unknown error');
+      return [];
+    }
+  }
+
+  // ==================== Rosters (Roster Periods) ====================
+
+  async getRoster(rosterId: number): Promise<TandaRoster> {
+    // GET /rosters/{id} - requires roster scope
+    const response = await this.client.get<TandaRoster>(`/rosters/${rosterId}`);
+    return response.data;
+  }
+
+  async getCurrentRoster(showCosts?: boolean): Promise<TandaRoster> {
+    // GET /rosters/current - requires roster scope
+    const params = new URLSearchParams();
+    if (showCosts) params.append('show_costs', 'true');
+
+    const response = await this.client.get<TandaRoster>('/rosters/current', { params });
+    return response.data;
+  }
+
+  async getRosterByDate(date: string, showCosts?: boolean): Promise<TandaRoster | null> {
+    // GET /rosters/on/{date} - requires roster scope
+    // Returns 204 if no roster exists for that date
+    try {
+      const params = new URLSearchParams();
+      if (showCosts) params.append('show_costs', 'true');
+
+      const response = await this.client.get<TandaRoster>(`/rosters/on/${date}`, { params });
+      return response.data;
+    } catch (error) {
+      if (error instanceof TandaApiError && error.statusCode === 204) {
+        return null;
+      }
+      throw error;
+    }
+  }
+
+  // ==================== Inactive Users ====================
+
+  async getInactiveUsers(): Promise<TandaUser[]> {
+    // GET /users/inactive - requires user scope
+    try {
+      const response = await this.client.get<TandaUser[]>('/users/inactive');
+      return response.data;
+    } catch (error) {
+      logger.warn('Inactive users endpoint not available:', error instanceof Error ? error.message : 'Unknown error');
+      return [];
+    }
+  }
+
+  // ==================== User Onboarding ====================
+
+  async onboardUsers(users: OnboardUserRequest[]): Promise<TandaBulkOnboardingResult> {
+    // POST /users/onboarding - requires user scope
+    try {
+      const response = await this.client.post<TandaBulkOnboardingResult>('/users/onboarding', { users });
+      return response.data;
+    } catch (error) {
+      logger.error('User onboarding failed:', error instanceof Error ? error.message : 'Unknown error');
+      throw error;
+    }
+  }
+
+  async inviteUser(userId: number): Promise<TandaUserInviteResult> {
+    // POST /users/{id}/invite - requires user scope
+    const response = await this.client.post<TandaUserInviteResult>(`/users/${userId}/invite`);
+    return response.data;
+  }
+
+  // ==================== Leave Types ====================
+
+  async getLeaveTypes(userId: number): Promise<TandaLeaveType[]> {
+    // GET /leave/types_for/{user_id} - requires leave scope
+    try {
+      const response = await this.client.get<TandaLeaveType[]>(`/leave/types_for/${userId}`);
+      return response.data;
+    } catch (error) {
+      logger.warn(`Leave types not available for user ${userId}:`, error instanceof Error ? error.message : 'Unknown error');
+      return [];
+    }
+  }
+
+  async calculateLeaveHours(
+    userId: number,
+    start: string,
+    finish: string,
+    leaveType: string
+  ): Promise<TandaLeaveHoursResult> {
+    // GET /leave/hours_between - requires leave scope
+    const params = new URLSearchParams({
+      user_id: userId.toString(),
+      start,
+      finish,
+      leave_type: leaveType,
+    });
+
+    const response = await this.client.get<TandaLeaveHoursResult>('/leave/hours_between', { params });
+    return response.data;
+  }
 
   // ==================== Data Streams ====================
 

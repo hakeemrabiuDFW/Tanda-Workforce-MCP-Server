@@ -1,7 +1,7 @@
 {
   "name": "tanda-workforce-mcp-server",
-  "version": "2.0.1",
-  "description": "Production-ready MCP Server for Tanda Workforce API with OAuth2 authentication",
+  "version": "3.0.0",
+  "description": "Production-ready MCP Server for Tanda Workforce API with OAuth2 authentication and real-time workforce tools",
   "main": "dist/index.js",
   "types": "dist/index.d.ts",
   "scripts": {

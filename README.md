@@ -1,19 +1,38 @@
-# Tanda Workforce MCP Server v2.0.1
+# Tanda Workforce MCP Server v3.0.0
 
-A production-ready MCP (Model Context Protocol) server for integrating Tanda Workforce API with AI assistants like Claude. Features OAuth2 authentication with PKCE support and comprehensive workforce management tools.
+A production-ready MCP (Model Context Protocol) server for integrating Tanda Workforce API with AI assistants like Claude. Features OAuth2 authentication with PKCE support, real-time workforce tools, and comprehensive workforce management capabilities.
 
-## What's New in v2.0.1
+## What's New in v3.0.0
 
-- **OAuth Compliance Fix** - Removed clock in/out and qualifications tools (require OAuth scopes not supported by Workforce.com)
-- **Fit-Gap Analysis** - Added documentation of OAuth scope limitations
-- **25+ OAuth-Compatible Tools** - All remaining tools verified to work with Workforce.com OAuth
+### Real-time Workforce Tools (Inspired by Monday.com MCP)
+- **Active Shifts** - `tanda_get_active_shifts` - See who's currently working in real-time
+- **Clocked-in Users** - `tanda_get_clocked_in_users` - Real-time attendance status
+- **Shift Breaks** - `tanda_get_shift_breaks` - Break compliance tracking
+- **Shift Limits** - `tanda_get_shift_limits` - Overtime warnings and hour limits
 
-## What's New in v2.0
+### Roster Period Management
+- **Current Roster** - `tanda_get_current_roster` - Get the active roster period
+- **Roster by Date** - `tanda_get_roster_by_date` - Get roster for any specific date
+- **Roster by ID** - `tanda_get_roster` - Get specific roster by ID
 
-- **Full RFC Compliance** - OAuth 2.0 Protected Resource Metadata (RFC 9728) for Claude.ai
-- **Improved SSE Stability** - Enhanced connection handling with 1-hour idle timeout
-- **Better API Coverage** - Updated endpoints to match Tanda/Workforce.com documentation
-- **Complete CRUD Operations** - Added delete operations for leave requests and other resources
+### Staff Management
+- **Inactive Users** - `tanda_get_inactive_users` - View terminated employees
+- **Bulk Onboarding** - `tanda_onboard_users` - Bulk employee onboarding
+- **User Invitations** - `tanda_invite_user` - Send app invitations
+
+### Leave Enhancements
+- **Leave Types** - `tanda_get_leave_types` - Available leave types per user
+- **Leave Calculator** - `tanda_calculate_leave_hours` - Calculate leave duration
+
+### New Workflow Prompts
+- **workforce_dashboard** - Real-time workforce overview
+- **compliance_check** - Break and hour limit compliance
+- **onboard_employee** - Guided onboarding workflow
+- **leave_planner** - Leave balance and planning assistant
+
+### Read-only Mode
+- Set `MCP_READ_ONLY_MODE=true` to disable all write operations
+- Automatically filters out write tools when listing available tools
 
 ## Features
 
@@ -23,7 +42,9 @@ A production-ready MCP (Model Context Protocol) server for integrating Tanda Wor
 - **OAuth Protected Resource Metadata** - RFC 9728 for automatic OAuth discovery
 - **SSE Real-time Transport** - Server-Sent Events for MCP remote transport
 - **MCP Protocol Support** - Full JSON-RPC 2.0 implementation (protocol version 2024-11-05)
-- **25+ Workforce Tools** - Users, schedules, timesheets, leave, and more (OAuth-compatible)
+- **38 Workforce Tools** - Users, schedules, timesheets, leave, real-time attendance, and more
+- **6 Workflow Prompts** - Guided workflows for common tasks
+- **Read-only Mode** - Restrict to read operations only (v3.0)
 - **Production Ready** - Docker support, rate limiting, security headers, logging
 - **TypeScript** - Fully typed codebase
 
@@ -50,6 +71,9 @@ Required environment variables:
 - `TANDA_REDIRECT_URI` - OAuth callback URL (e.g., `https://your-domain.com/auth/callback`)
 - `SESSION_SECRET` - Random 32+ character string
 - `JWT_SECRET` - Random 32+ character string
+
+Optional v3.0 configuration:
+- `MCP_READ_ONLY_MODE` - Set to `true` to disable write operations
 
 ### 3. Run
 
@@ -109,62 +133,21 @@ Add to your Claude Desktop config file:
 2. Authenticate with your Tanda account
 3. Copy the returned JWT token
 
-## Team Member Access
-
-Each team member can connect to the same MCP server:
-
-1. **Individual Authentication**: Each person authenticates with their own Tanda credentials
-2. **Separate Sessions**: Each authenticated user gets their own session
-3. **Permission-Based Access**: Tool access depends on each user's Tanda permissions
-
-> **Note**: Sessions are stored in-memory. For production deployments with multiple server instances, consider implementing a shared session store (e.g., Redis).
-
-## API Endpoints
-
-### Core Endpoints
-
-| Endpoint | Method | Description |
-|----------|--------|-------------|
-| `/` | GET | Server info and endpoint listing |
-| `/health` | GET | Health check |
-| `/docs` | GET | API documentation |
-| `/stats` | GET | Server statistics |
-
-### OAuth 2.0 Endpoints
-
-| Endpoint | Method | Description |
-|----------|--------|-------------|
-| `/.well-known/oauth-authorization-server` | GET | OAuth discovery (RFC 8414) |
-| `/.well-known/oauth-protected-resource` | GET | Protected resource metadata (RFC 9728) |
-| `/oauth/register` | POST | Dynamic Client Registration (RFC 7591) |
-| `/authorize` | GET | OAuth2 authorization endpoint |
-| `/token` | POST | OAuth2 token endpoint (supports PKCE) |
-
-### Authentication Endpoints
-
-| Endpoint | Method | Description |
-|----------|--------|-------------|
-| `/auth/login` | GET | Start OAuth flow (browser) |
-| `/auth/callback` | GET | OAuth callback handler |
-| `/auth/status` | GET | Check authentication status |
-| `/auth/logout` | POST | Logout and invalidate session |
-| `/api/authenticate` | POST | Exchange code for JWT token |
-| `/api/me` | GET | Get current user (protected) |
-
-### MCP Endpoints
-
-| Endpoint | Method | Description |
-|----------|--------|-------------|
-| `/mcp` | GET | SSE endpoint for real-time transport |
-| `/mcp` | POST | MCP JSON-RPC 2.0 endpoint |
-| `/` | POST | MCP endpoint (Claude compatibility) |
-
-## Available Tools (25+)
+## Available Tools (38)
 
 ### User Management
 - `tanda_get_current_user` - Get current user profile
 - `tanda_get_users` - List all employees
 - `tanda_get_user` - Get specific user details
+- `tanda_get_inactive_users` - Get terminated employees (v3.0)
+- `tanda_onboard_users` - Bulk employee onboarding (v3.0)
+- `tanda_invite_user` - Send app invitation (v3.0)
+
+### Real-time Attendance (v3.0)
+- `tanda_get_active_shifts` - Who's currently working
+- `tanda_get_clocked_in_users` - Currently clocked-in employees
+- `tanda_get_shift_breaks` - Break records for a shift
+- `tanda_get_shift_limits` - Hour limits and overtime warnings
 
 ### Scheduling
 - `tanda_get_schedules` - Get scheduled shifts
@@ -172,6 +155,11 @@ Each team member can connect to the same MCP server:
 - `tanda_update_schedule` - Update shift
 - `tanda_delete_schedule` - Delete shift
 - `tanda_publish_schedules` - Publish schedules
+
+### Roster Periods (v3.0)
+- `tanda_get_roster` - Get roster by ID
+- `tanda_get_current_roster` - Get current roster period
+- `tanda_get_roster_by_date` - Get roster for specific date
 
 ### Timesheets
 - `tanda_get_shifts` - Get worked shifts
@@ -186,6 +174,8 @@ Each team member can connect to the same MCP server:
 - `tanda_decline_leave` - Decline leave
 - `tanda_delete_leave_request` - Delete leave request
 - `tanda_get_leave_balances` - Get leave balances
+- `tanda_get_leave_types` - Get available leave types (v3.0)
+- `tanda_calculate_leave_hours` - Calculate leave duration (v3.0)
 
 ### Unavailability
 - `tanda_get_unavailability` - Get unavailability records
@@ -202,6 +192,30 @@ Each team member can connect to the same MCP server:
 - `tanda_get_roster_costs` - Get labor costs
 - `tanda_get_award_interpretation` - Get pay calculations
 - `tanda_get_daily_stats` - Get daily workforce statistics
+
+## Available Prompts (6)
+
+| Prompt | Description |
+|--------|-------------|
+| `schedule_overview` | Get schedule overview for a date range |
+| `team_availability` | Check team availability for a date |
+| `workforce_dashboard` | Real-time workforce dashboard (v3.0) |
+| `compliance_check` | Check break and hour compliance (v3.0) |
+| `onboard_employee` | Guided onboarding workflow (v3.0) |
+| `leave_planner` | Leave balance and planning (v3.0) |
+
+## Read-only Mode (v3.0)
+
+Enable read-only mode to restrict the server to read operations only:
+
+```bash
+MCP_READ_ONLY_MODE=true
+```
+
+When enabled:
+- Write tools are hidden from the tools list
+- Attempts to execute write tools return an error
+- Useful for dashboards and reporting integrations
 
 ## Docker Deployment
 
@@ -263,6 +277,8 @@ src/
   index.ts        # Entry point
 tests/              # Test files
 scripts/            # Test and utility scripts
+docs/               # Documentation
+  FIT_GAP_ANALYSIS.md
 Dockerfile
 docker-compose.yml
 DEPLOYMENT.md       # Full deployment guide
@@ -279,18 +295,26 @@ See [DEPLOYMENT.md](./DEPLOYMENT.md) for comprehensive deployment instructions i
 
 ## Changelog
 
+### v3.0.0
+- **NEW**: Real-time attendance tools (active shifts, clocked-in users, shift breaks, shift limits)
+- **NEW**: Roster period management (current roster, roster by date)
+- **NEW**: Staff management (inactive users, bulk onboarding, user invitations)
+- **NEW**: Leave enhancements (leave types, leave hours calculator)
+- **NEW**: 4 workflow prompts (workforce_dashboard, compliance_check, onboard_employee, leave_planner)
+- **NEW**: Read-only mode (`MCP_READ_ONLY_MODE=true`)
+- **NEW**: 38 total tools (13 new tools added)
+- Inspired by Monday.com MCP server architecture
+
 ### v2.0.1
-- **BREAKING**: Removed clock in/out tools (`tanda_clock_in`, `tanda_get_clock_ins`) - require `device` OAuth scope not supported by Workforce.com
-- **BREAKING**: Removed qualifications tools (`tanda_get_qualifications`, `tanda_get_user_qualifications`) - require `qualifications` OAuth scope not supported by Workforce.com
-- Added Fit-Gap Analysis documentation (`docs/FIT_GAP_ANALYSIS.md`)
-- All remaining tools verified to work with Workforce.com OAuth scopes
+- **BREAKING**: Removed clock in/out tools - require `device` OAuth scope not supported by Workforce.com
+- **BREAKING**: Removed qualifications tools - require `qualifications` OAuth scope not supported by Workforce.com
+- Added Fit-Gap Analysis documentation
 
 ### v2.0.0
 - Added OAuth Protected Resource Metadata (RFC 9728) for Claude.ai compatibility
 - Added delete leave request tool for complete CRUD operations
 - Improved SSE connection stability with 1-hour idle timeout
 - Updated API endpoints to match Tanda/Workforce.com documentation
-- Fixed Unix timestamp handling in daily stats calculation
 
 ### v1.0.0
 - Initial release with 25+ workforce management tools
@@ -306,3 +330,8 @@ MIT License - see [LICENSE](./LICENSE) file
 ## Author
 
 hakeemrabiuDFW
+
+## Acknowledgments
+
+- Inspired by [Monday.com MCP Server](https://github.com/mondaycom/mcp)
+- Built with [Model Context Protocol](https://modelcontextprotocol.io/)
