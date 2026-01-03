@@ -1,10 +1,15 @@
-# Tanda Workforce MCP Server v2.0
+# Tanda Workforce MCP Server v2.0.1
 
 A production-ready MCP (Model Context Protocol) server for integrating Tanda Workforce API with AI assistants like Claude. Features OAuth2 authentication with PKCE support and comprehensive workforce management tools.
 
+## What's New in v2.0.1
+
+- **OAuth Compliance Fix** - Removed clock in/out and qualifications tools (require OAuth scopes not supported by Workforce.com)
+- **Fit-Gap Analysis** - Added documentation of OAuth scope limitations
+- **25+ OAuth-Compatible Tools** - All remaining tools verified to work with Workforce.com OAuth
+
 ## What's New in v2.0
 
-- **30+ Workforce Tools** - Added clock in/out operations, qualifications management, and more
 - **Full RFC Compliance** - OAuth 2.0 Protected Resource Metadata (RFC 9728) for Claude.ai
 - **Improved SSE Stability** - Enhanced connection handling with 1-hour idle timeout
 - **Better API Coverage** - Updated endpoints to match Tanda/Workforce.com documentation
@@ -18,7 +23,7 @@ A production-ready MCP (Model Context Protocol) server for integrating Tanda Wor
 - **OAuth Protected Resource Metadata** - RFC 9728 for automatic OAuth discovery
 - **SSE Real-time Transport** - Server-Sent Events for MCP remote transport
 - **MCP Protocol Support** - Full JSON-RPC 2.0 implementation (protocol version 2024-11-05)
-- **30+ Workforce Tools** - Users, schedules, timesheets, leave, clock-in/out, qualifications, and more
+- **25+ Workforce Tools** - Users, schedules, timesheets, leave, and more (OAuth-compatible)
 - **Production Ready** - Docker support, rate limiting, security headers, logging
 - **TypeScript** - Fully typed codebase
 
@@ -154,7 +159,7 @@ Each team member can connect to the same MCP server:
 | `/mcp` | POST | MCP JSON-RPC 2.0 endpoint |
 | `/` | POST | MCP endpoint (Claude compatibility) |
 
-## Available Tools (30+)
+## Available Tools (25+)
 
 ### User Management
 - `tanda_get_current_user` - Get current user profile
@@ -182,10 +187,6 @@ Each team member can connect to the same MCP server:
 - `tanda_delete_leave_request` - Delete leave request
 - `tanda_get_leave_balances` - Get leave balances
 
-### Clock In/Out
-- `tanda_clock_in` - Clock in/out operations (start, finish, break_start, break_finish)
-- `tanda_get_clock_ins` - Get clock records
-
 ### Unavailability
 - `tanda_get_unavailability` - Get unavailability records
 - `tanda_create_unavailability` - Create unavailability
@@ -196,10 +197,6 @@ Each team member can connect to the same MCP server:
 - `tanda_get_locations` - List locations
 - `tanda_get_teams` - List teams
 - `tanda_get_staff_by_department` - Get staff in department
-
-### Qualifications
-- `tanda_get_qualifications` - List qualification types
-- `tanda_get_user_qualifications` - Get user qualifications
 
 ### Costs & Statistics
 - `tanda_get_roster_costs` - Get labor costs
@@ -282,9 +279,13 @@ See [DEPLOYMENT.md](./DEPLOYMENT.md) for comprehensive deployment instructions i
 
 ## Changelog
 
+### v2.0.1
+- **BREAKING**: Removed clock in/out tools (`tanda_clock_in`, `tanda_get_clock_ins`) - require `device` OAuth scope not supported by Workforce.com
+- **BREAKING**: Removed qualifications tools (`tanda_get_qualifications`, `tanda_get_user_qualifications`) - require `qualifications` OAuth scope not supported by Workforce.com
+- Added Fit-Gap Analysis documentation (`docs/FIT_GAP_ANALYSIS.md`)
+- All remaining tools verified to work with Workforce.com OAuth scopes
+
 ### v2.0.0
-- Added clock in/out tools (`tanda_clock_in`, `tanda_get_clock_ins`)
-- Added qualifications tools (`tanda_get_qualifications`, `tanda_get_user_qualifications`)
 - Added OAuth Protected Resource Metadata (RFC 9728) for Claude.ai compatibility
 - Added delete leave request tool for complete CRUD operations
 - Improved SSE connection stability with 1-hour idle timeout
