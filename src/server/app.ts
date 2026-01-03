@@ -464,11 +464,15 @@ export function createApp(): Application {
 
   // GET /mcp - SSE endpoint for server-to-client messages (required for remote MCP)
   app.get('/mcp', optionalAuth, (req: Request, res: Response) => {
-    // Set SSE headers
+    // Set comprehensive SSE headers for proxy compatibility
     res.setHeader('Content-Type', 'text/event-stream');
-    res.setHeader('Cache-Control', 'no-cache');
+    res.setHeader('Cache-Control', 'no-cache, no-store, must-revalidate');
     res.setHeader('Connection', 'keep-alive');
+    res.setHeader('Keep-Alive', 'timeout=600'); // 10 minute timeout hint
     res.setHeader('X-Accel-Buffering', 'no'); // Disable nginx buffering
+    res.setHeader('X-Content-Type-Options', 'nosniff');
+    // Disable any response compression that might buffer
+    res.setHeader('Content-Encoding', 'identity');
     res.flushHeaders();
 
     let connectionClosed = false;
@@ -510,12 +514,13 @@ export function createApp(): Application {
       return;
     }
 
-    // Keep connection alive with periodic pings (every 30 seconds)
+    // Keep connection alive with aggressive pings every 15 seconds
+    // This helps prevent proxy timeouts (Railway default is ~30s)
     pingInterval = setInterval(() => {
       if (!safeWrite(`: ping\n\n`)) {
         cleanup();
       }
-    }, 30000);
+    }, 15000);
 
     // Handle client disconnect
     req.on('close', cleanup);
