@@ -439,7 +439,13 @@ export class TandaClient {
         const statsByDate = new Map<string, TandaDailyStats>();
 
         for (const schedule of schedules) {
-          const date = schedule.start.split('T')[0];
+          // Handle both Unix timestamps (number) and ISO strings
+          const startValue = schedule.start;
+          const startDate = typeof startValue === 'number'
+            ? new Date(startValue * 1000)
+            : new Date(startValue);
+          const date = startDate.toISOString().split('T')[0];
+
           const existing = statsByDate.get(date) || {
             date,
             scheduled_hours: 0,
@@ -447,9 +453,11 @@ export class TandaClient {
             headcount: 0,
           };
           // Calculate scheduled hours
-          const start = new Date(schedule.start);
-          const finish = new Date(schedule.finish);
-          const hours = (finish.getTime() - start.getTime()) / (1000 * 60 * 60);
+          const finishValue = schedule.finish;
+          const finish = typeof finishValue === 'number'
+            ? new Date(finishValue * 1000)
+            : new Date(finishValue);
+          const hours = (finish.getTime() - startDate.getTime()) / (1000 * 60 * 60);
           existing.scheduled_hours += hours;
           existing.headcount += 1;
           statsByDate.set(date, existing);
