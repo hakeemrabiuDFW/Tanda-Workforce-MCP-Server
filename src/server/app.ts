@@ -147,9 +147,11 @@ export function createApp(): Application {
       token_endpoint: `${baseUrl}/token`,
       registration_endpoint: `${baseUrl}/oauth/register`,
       response_types_supported: ['code'],
-      grant_types_supported: ['authorization_code'],
+      grant_types_supported: ['authorization_code', 'refresh_token'],
       code_challenge_methods_supported: ['S256'],
-      token_endpoint_auth_methods_supported: ['none'],
+      // Claude.ai requires client_secret_post support
+      token_endpoint_auth_methods_supported: ['none', 'client_secret_post'],
+      scopes_supported: ['user', 'department', 'leave', 'roster', 'timesheet', 'cost'],
     });
   });
 
