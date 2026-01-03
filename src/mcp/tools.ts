@@ -387,6 +387,20 @@ export const tandaTools: MCPTool[] = [
     },
   },
   {
+    name: 'tanda_delete_leave_request',
+    description: 'Delete a leave request (use to clean up test data or cancel pending requests)',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        leave_id: {
+          type: 'number',
+          description: 'The leave request ID to delete',
+        },
+      },
+      required: ['leave_id'],
+    },
+  },
+  {
     name: 'tanda_get_leave_balances',
     description: 'Get leave balances for a specific user',
     inputSchema: {
@@ -715,6 +729,10 @@ export async function executeTool(
             args.reason as string | undefined
           ),
         };
+
+      case 'tanda_delete_leave_request':
+        await client.deleteLeaveRequest(args.leave_id as number);
+        return { content: { success: true, message: 'Leave request deleted successfully' } };
 
       case 'tanda_get_leave_balances':
         return { content: await client.getLeaveBalances(args.user_id as number) };
