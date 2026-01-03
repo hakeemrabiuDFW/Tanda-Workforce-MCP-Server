@@ -259,23 +259,50 @@ export class TandaClient {
   // ==================== Timesheets ====================
 
   async getTimesheets(filter: TimesheetFilter): Promise<TandaTimesheet[]> {
-    // Note: Workforce.com API uses /shifts for timesheet data
-    // The /timesheets endpoint may not exist - fall back to /shifts
-    const params = new URLSearchParams({
-      from: filter.from,
-      to: filter.to,
-    });
+    // Tanda API: /timesheets/on/{date} for specific date, /timesheets/current for current period
+    // We iterate through date range and aggregate results
+    const params = new URLSearchParams();
     if (filter.user_ids?.length) params.append('user_ids', filter.user_ids.join(','));
     if (filter.approved !== undefined) params.append('approved', String(filter.approved));
-    if (filter.include_costs) params.append('include_costs', 'true');
+    if (filter.include_costs) params.append('show_costs', 'true');
 
     try {
-      const response = await this.client.get<TandaTimesheet[]>('/timesheets', { params });
-      return response.data;
-    } catch (error) {
-      // Fallback to shifts endpoint if timesheets doesn't exist
+      // Try /timesheets/on/{date} endpoint for each date in range
+      const fromDate = new Date(filter.from);
+      const toDate = new Date(filter.to);
+      const allTimesheets: TandaTimesheet[] = [];
+
+      // Iterate through dates
+      const currentDate = new Date(fromDate);
+      while (currentDate <= toDate) {
+        const dateStr = currentDate.toISOString().split('T')[0];
+        try {
+          const response = await this.client.get<TandaTimesheet[]>(`/timesheets/on/${dateStr}`, { params });
+          if (Array.isArray(response.data)) {
+            allTimesheets.push(...response.data);
+          }
+        } catch {
+          // Skip dates with no data
+        }
+        currentDate.setDate(currentDate.getDate() + 1);
+      }
+
+      if (allTimesheets.length > 0) {
+        return allTimesheets;
+      }
+
+      // Fallback: try /timesheets/current
+      const currentResponse = await this.client.get<TandaTimesheet[]>('/timesheets/current', { params });
+      return Array.isArray(currentResponse.data) ? currentResponse.data : [];
+    } catch {
+      // Final fallback to shifts endpoint
       logger.debug('Timesheets endpoint not available, using shifts');
-      const response = await this.client.get<TandaTimesheet[]>('/shifts', { params });
+      const shiftParams = new URLSearchParams({
+        from: filter.from,
+        to: filter.to,
+      });
+      if (filter.user_ids?.length) shiftParams.append('user_ids', filter.user_ids.join(','));
+      const response = await this.client.get<TandaTimesheet[]>('/shifts', { params: shiftParams });
       return response.data;
     }
   }
@@ -324,19 +351,38 @@ export class TandaClient {
   }
 
   async getLeaveBalances(userId: number): Promise<TandaLeaveBalance[]> {
-    // Try multiple endpoint variations as Workforce.com API may differ
+    // Tanda API: GET /leave_balances?user_ids= (requires 'leave' scope)
     try {
-      const response = await this.client.get<TandaLeaveBalance[]>(`/users/${userId}/leave_balances`);
-      return response.data;
+      // Primary endpoint: /leave_balances with user_ids parameter (plural)
+      const response = await this.client.get<TandaLeaveBalance[]>('/leave_balances', {
+        params: { user_ids: userId.toString() },
+      });
+      return Array.isArray(response.data) ? response.data : [];
     } catch {
       try {
-        // Alternative: /leave_balances with user filter
-        const response = await this.client.get<TandaLeaveBalance[]>('/leave_balances', {
-          params: { user_id: userId },
-        });
-        return response.data;
+        // Alternative: Get leave requests and extract balance info
+        const leaveRequests = await this.getLeaveRequests({ user_ids: [userId] });
+        // Extract unique leave types from requests as pseudo-balances
+        const balanceMap = new Map<string, TandaLeaveBalance>();
+        for (const req of leaveRequests) {
+          const leaveType = req.leave_type || 'unknown';
+          if (!balanceMap.has(leaveType)) {
+            balanceMap.set(leaveType, {
+              id: 0,
+              user_id: userId,
+              leave_type: leaveType,
+              balance: 0, // Cannot determine actual balance without endpoint
+              unit: 'hours',
+            });
+          }
+        }
+        if (balanceMap.size > 0) {
+          logger.debug(`Leave balances derived from ${leaveRequests.length} leave requests`);
+          return Array.from(balanceMap.values());
+        }
+        logger.warn(`Leave balances endpoint not available for user ${userId}`);
+        return [];
       } catch {
-        // Return empty array with note if endpoint doesn't exist
         logger.warn(`Leave balances endpoint not available for user ${userId}`);
         return [];
       }
@@ -377,26 +423,36 @@ export class TandaClient {
   }
 
   // ==================== Teams ====================
+  // Note: In Tanda/Workforce.com API, "Teams" are the same as "Departments"
+  // The /teams endpoint doesn't exist - we use /departments instead
 
   async getTeams(): Promise<TandaTeam[]> {
+    // Teams in Tanda are implemented as Departments
+    // Map departments to team format for compatibility
     try {
-      const response = await this.client.get<TandaTeam[]>('/teams');
-      return response.data;
-    } catch {
-      // Alternative: groups endpoint
-      try {
-        const response = await this.client.get<TandaTeam[]>('/groups');
-        return response.data;
-      } catch {
-        logger.warn('Teams endpoint not available');
-        return [];
-      }
+      const departments = await this.getDepartments();
+      return departments.map(dept => ({
+        id: dept.id,
+        name: dept.name,
+        department_id: dept.id,
+        colour: dept.colour,
+        // Map other department fields to team fields
+      }));
+    } catch (error) {
+      logger.warn('Unable to fetch teams (departments):', error instanceof Error ? error.message : 'Unknown error');
+      return [];
     }
   }
 
   async getTeam(teamId: number): Promise<TandaTeam> {
-    const response = await this.client.get<TandaTeam>(`/teams/${teamId}`);
-    return response.data;
+    // Teams are departments in Tanda
+    const dept = await this.getDepartment(teamId);
+    return {
+      id: dept.id,
+      name: dept.name,
+      department_id: dept.id,
+      colour: dept.colour,
+    };
   }
 
   // ==================== Staff by Department ====================
@@ -488,49 +544,116 @@ export class TandaClient {
   // ==================== Award Interpretation ====================
 
   async getAwardInterpretation(filter: DateRangeFilter & { user_ids?: number[] }): Promise<TandaAwardInterpretation[]> {
+    // Tanda API: Award interpretation is available via ?show_award_interpretation=true on shifts
+    // Requires 'cost' scope in addition to 'timesheet' scope
     const params = new URLSearchParams({
       from: filter.from,
       to: filter.to,
+      show_award_interpretation: 'true',
     });
     if (filter.user_ids?.length) params.append('user_ids', filter.user_ids.join(','));
 
     try {
-      const response = await this.client.get<TandaAwardInterpretation[]>('/award_interpretations', { params });
-      return response.data;
-    } catch {
-      try {
-        // Alternative endpoint
-        const response = await this.client.get<TandaAwardInterpretation[]>('/payslips', { params });
-        return response.data;
-      } catch {
-        logger.warn('Award interpretation endpoint not available');
-        return [];
+      // Get shifts with award interpretation data
+      const response = await this.client.get<TandaShift[]>('/shifts', { params });
+
+      // Extract and format award interpretation data from shifts
+      const interpretations: TandaAwardInterpretation[] = [];
+      for (const shift of response.data) {
+        if (shift.award_interpretation) {
+          interpretations.push({
+            id: shift.id,
+            user_id: shift.user_id,
+            date: shift.date,
+            shift_id: shift.id,
+            award_interpretation: shift.award_interpretation,
+            cost: shift.cost,
+          });
+        }
       }
+      return interpretations;
+    } catch (error) {
+      // Log specific error for debugging
+      logger.warn('Award interpretation not available:', error instanceof Error ? error.message : 'Unknown error');
+      logger.debug('Award interpretation requires "cost" OAuth scope');
+      return [];
     }
   }
 
   // ==================== Roster Costs ====================
 
   async getRosterCosts(filter: DateRangeFilter & { department_ids?: number[] }): Promise<TandaRosterCost[]> {
-    const params = new URLSearchParams({
-      from: filter.from,
-      to: filter.to,
-    });
-    if (filter.department_ids?.length) params.append('department_ids', filter.department_ids.join(','));
-
+    // Tanda API: Use /rosters/on/{date}?show_costs=true or /rosters/current?show_costs=true
+    // Requires 'roster' and 'cost' scopes
     try {
-      const response = await this.client.get<TandaRosterCost[]>('/rosters/costs', { params });
-      return response.data;
-    } catch {
-      try {
-        // Alternative: use schedules with show_costs
-        params.append('show_costs', 'true');
-        const response = await this.client.get<TandaRosterCost[]>('/schedules', { params });
-        return response.data;
-      } catch {
-        logger.warn('Roster costs endpoint not available');
-        return [];
+      // Try getting rosters with costs for date range
+      const fromDate = new Date(filter.from);
+      const toDate = new Date(filter.to);
+      const allCosts: TandaRosterCost[] = [];
+
+      // Iterate through dates to get roster costs
+      const currentDate = new Date(fromDate);
+      while (currentDate <= toDate) {
+        const dateStr = currentDate.toISOString().split('T')[0];
+        try {
+          const params = new URLSearchParams({ show_costs: 'true' });
+          if (filter.department_ids?.length) {
+            params.append('department_ids', filter.department_ids.join(','));
+          }
+          const response = await this.client.get<TandaRosterCost>(`/rosters/on/${dateStr}`, { params });
+          if (response.data) {
+            // Add date to the cost record
+            allCosts.push({
+              ...response.data,
+              date: dateStr,
+            });
+          }
+        } catch {
+          // Skip dates without roster data
+        }
+        currentDate.setDate(currentDate.getDate() + 1);
       }
+
+      if (allCosts.length > 0) {
+        return allCosts;
+      }
+
+      // Fallback: Get schedules with show_costs=true and aggregate
+      const scheduleParams = new URLSearchParams({
+        from: filter.from,
+        to: filter.to,
+        show_costs: 'true',
+      });
+      if (filter.department_ids?.length) {
+        scheduleParams.append('department_ids', filter.department_ids.join(','));
+      }
+
+      const schedules = await this.client.get<TandaSchedule[]>('/schedules', { params: scheduleParams });
+
+      // Aggregate costs by date from schedules
+      const costsByDate = new Map<string, { date: string; cost: number; schedules_count: number }>();
+      for (const schedule of schedules.data) {
+        const startValue = schedule.start;
+        const startDate = typeof startValue === 'number'
+          ? new Date(startValue * 1000)
+          : new Date(startValue);
+        const dateStr = startDate.toISOString().split('T')[0];
+
+        const existing = costsByDate.get(dateStr) || {
+          date: dateStr,
+          cost: 0,
+          schedules_count: 0,
+        };
+        existing.cost += schedule.cost || 0;
+        existing.schedules_count += 1;
+        costsByDate.set(dateStr, existing);
+      }
+
+      return Array.from(costsByDate.values());
+    } catch (error) {
+      logger.warn('Roster costs not available:', error instanceof Error ? error.message : 'Unknown error');
+      logger.debug('Roster costs require "roster" and "cost" OAuth scopes');
+      return [];
     }
   }
 

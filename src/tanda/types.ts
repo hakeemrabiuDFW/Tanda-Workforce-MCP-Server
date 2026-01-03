@@ -57,8 +57,8 @@ export interface TandaSchedule {
   id: number;
   user_id?: number;
   department_id?: number;
-  start: string;
-  finish: string;
+  start: string | number; // Can be ISO string or Unix timestamp
+  finish: string | number; // Can be ISO string or Unix timestamp
   breaks?: TandaBreak[];
   shift_detail_id?: number;
   automatic_break_length?: number;
@@ -70,6 +70,7 @@ export interface TandaSchedule {
   accepted?: boolean;
   creation_user_id?: number;
   notes?: string;
+  cost?: number; // Cost when show_costs=true
 }
 
 export interface TandaBreak {
@@ -96,6 +97,8 @@ export interface TandaShift {
   approved?: boolean;
   cost?: number;
   metadata?: Record<string, unknown>;
+  // Award interpretation data (when requested with show_award_interpretation=true)
+  award_interpretation?: Record<string, unknown>;
 }
 
 export interface TandaAllowance {
@@ -139,6 +142,7 @@ export interface TandaLeaveBalance {
   accrued?: number;
   taken?: number;
   pending?: number;
+  unit?: string; // 'hours' or 'days'
 }
 
 export interface TandaClockIn {
@@ -171,6 +175,7 @@ export interface TandaUserQualification {
 }
 
 export interface TandaAwardInterpretation {
+  id?: number;
   date: string;
   user_id: number;
   shift_id?: number;
@@ -179,15 +184,18 @@ export interface TandaAwardInterpretation {
   leave_hours?: number;
   overtime?: number;
   allowances?: TandaAllowance[];
+  award_interpretation?: Record<string, unknown>; // Raw data from API
 }
 
 export interface TandaRosterCost {
   date: string;
   department_id?: number;
-  total_cost: number;
-  wages_cost: number;
+  total_cost?: number;
+  wages_cost?: number;
   allowances_cost?: number;
-  total_hours: number;
+  total_hours?: number;
+  cost?: number; // Alternative field name
+  schedules_count?: number; // Number of schedules aggregated
 }
 
 export interface TandaUnavailability {
@@ -209,9 +217,11 @@ export interface TandaUnavailability {
 export interface TandaTeam {
   id: number;
   name: string;
+  department_id?: number; // Teams are mapped from departments
   department_ids?: number[];
   user_ids?: number[];
   managers?: number[];
+  colour?: string;
   created_at?: string;
   updated_at?: string;
 }
