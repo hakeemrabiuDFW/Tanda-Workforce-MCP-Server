@@ -350,6 +350,11 @@ export const tandaTools: MCPTool[] = [
           type: 'string',
           description: 'Optional reason for leave',
         },
+        status: {
+          type: 'string',
+          enum: ['pending', 'approved'],
+          description: 'Leave request status (defaults to pending)',
+        },
       },
       required: ['user_id', 'leave_type', 'start', 'finish'],
     },
@@ -716,6 +721,7 @@ export async function executeTool(
             finish: args.finish as string,
             hours: args.hours as number | undefined,
             reason: args.reason as string | undefined,
+            status: (args.status as 'pending' | 'approved' | undefined) || 'pending',
           }),
         };
 

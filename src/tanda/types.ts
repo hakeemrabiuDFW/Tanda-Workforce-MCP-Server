@@ -276,6 +276,7 @@ export interface CreateLeaveRequest {
   finish: string;
   hours?: number;
   reason?: string;
+  status?: 'pending' | 'approved';
 }
 
 export interface CreateUnavailabilityRequest {
