@@ -14,5 +14,5 @@ startCommand = "npm start"
 # Long-lived connection support for SSE/MCP
 # Railway's default proxy timeout is 30s, we need longer for SSE
 [deploy.networking]
-# Keep connections alive for up to 5 minutes
-idleTimeout = 300
+# Keep connections alive for up to 1 hour
+idleTimeout = 3600
