@@ -1,7 +1,7 @@
 import { Request, Response } from 'express';
 import { config } from '../config/environment';
 import { logger } from '../utils/logger';
-import { tandaTools, executeTool } from './tools';
+import { tandaTools, executeTool, getAvailableTools } from './tools';
 import { TandaClient } from '../tanda/client';
 
 // MCP Protocol Types
@@ -118,13 +118,13 @@ export class MCPHandler {
     };
   }
 
-  // List available tools
+  // List available tools (v3.0: respects read-only mode)
   private handleListTools(request: MCPRequest): MCPResponse {
     return {
       jsonrpc: '2.0',
       id: request.id,
       result: {
-        tools: tandaTools,
+        tools: getAvailableTools(),
       },
     };
   }
@@ -277,7 +277,7 @@ export class MCPHandler {
     }
   }
 
-  // List prompts
+  // List prompts (v3.0: includes new workflow prompts)
   private handleListPrompts(request: MCPRequest): MCPResponse {
     return {
       jsonrpc: '2.0',
@@ -313,6 +313,55 @@ export class MCPHandler {
                 name: 'department_id',
                 description: 'Department ID to filter by',
                 required: false,
+              },
+            ],
+          },
+          // v3.0 New Prompts
+          {
+            name: 'workforce_dashboard',
+            description: 'Real-time workforce overview with active shifts, attendance, and alerts',
+            arguments: [],
+          },
+          {
+            name: 'compliance_check',
+            description: 'Check compliance status: breaks taken, hour limits, award requirements',
+            arguments: [
+              {
+                name: 'date',
+                description: 'Date to check (YYYY-MM-DD, defaults to today)',
+                required: false,
+              },
+              {
+                name: 'user_id',
+                description: 'Specific user ID to check (optional)',
+                required: false,
+              },
+            ],
+          },
+          {
+            name: 'onboard_employee',
+            description: 'Step-by-step guided employee onboarding workflow',
+            arguments: [
+              {
+                name: 'email',
+                description: 'New employee email address',
+                required: true,
+              },
+              {
+                name: 'name',
+                description: 'New employee full name',
+                required: true,
+              },
+            ],
+          },
+          {
+            name: 'leave_planner',
+            description: 'Check leave balances, available types, and plan leave requests',
+            arguments: [
+              {
+                name: 'user_id',
+                description: 'User ID to plan leave for',
+                required: true,
               },
             ],
           },
@@ -374,6 +423,113 @@ export class MCPHandler {
 2. Who is on leave
 3. Who is available but not scheduled
 4. Any qualification requirements that might affect assignments`,
+                },
+              },
+            ],
+          },
+        };
+
+      // v3.0 New Prompt Handlers
+      case 'workforce_dashboard':
+        return {
+          jsonrpc: '2.0',
+          id: request.id,
+          result: {
+            description: 'Real-time workforce dashboard',
+            messages: [
+              {
+                role: 'user',
+                content: {
+                  type: 'text',
+                  text: `Generate a real-time workforce dashboard showing:
+1. Currently active shifts - who is working right now (use tanda_get_active_shifts)
+2. Clocked-in employees - real-time attendance status (use tanda_get_clocked_in_users)
+3. Current roster period overview (use tanda_get_current_roster)
+4. Any shift limit warnings or compliance alerts (use tanda_get_shift_limits)
+5. Pending leave requests that need attention
+
+Format the dashboard with clear sections and highlight any items requiring immediate attention.`,
+                },
+              },
+            ],
+          },
+        };
+
+      case 'compliance_check':
+        return {
+          jsonrpc: '2.0',
+          id: request.id,
+          result: {
+            description: 'Compliance status check',
+            messages: [
+              {
+                role: 'user',
+                content: {
+                  type: 'text',
+                  text: `Perform a compliance check${promptArgs.date ? ` for ${promptArgs.date}` : ' for today'}${promptArgs.user_id ? ` for user ${promptArgs.user_id}` : ' for all active users'}:
+
+1. Check shift hour limits and overtime warnings (use tanda_get_shift_limits)
+2. Review break compliance for active shifts (use tanda_get_shift_breaks for each shift)
+3. Verify award interpretation requirements are met (use tanda_get_award_interpretation)
+4. Flag any violations or warnings
+
+Provide a summary with:
+- ✅ Compliant items
+- ⚠️ Warnings that need attention
+- ❌ Violations that require immediate action`,
+                },
+              },
+            ],
+          },
+        };
+
+      case 'onboard_employee':
+        return {
+          jsonrpc: '2.0',
+          id: request.id,
+          result: {
+            description: 'Employee onboarding workflow',
+            messages: [
+              {
+                role: 'user',
+                content: {
+                  type: 'text',
+                  text: `Guide me through onboarding a new employee:
+- Email: ${promptArgs.email || '[employee email]'}
+- Name: ${promptArgs.name || '[employee name]'}
+
+Steps:
+1. First, list available departments (use tanda_get_departments) so I can assign them
+2. Then use tanda_onboard_users to create the user account with:
+   - Email and name as provided
+   - Suggested department assignment
+   - Send invitation email
+3. Confirm the onboarding was successful
+4. Suggest next steps (scheduling their first shift, adding to roster, etc.)`,
+                },
+              },
+            ],
+          },
+        };
+
+      case 'leave_planner':
+        return {
+          jsonrpc: '2.0',
+          id: request.id,
+          result: {
+            description: 'Leave planning assistant',
+            messages: [
+              {
+                role: 'user',
+                content: {
+                  type: 'text',
+                  text: `Help plan leave for user ${promptArgs.user_id || '[user_id]'}:
+
+1. Get their current leave balances (use tanda_get_leave_balances)
+2. Show available leave types (use tanda_get_leave_types)
+3. If they want to request specific dates, calculate the hours needed (use tanda_calculate_leave_hours)
+4. Check team coverage for the requested dates (use tanda_get_schedules for that period)
+5. Help create the leave request if there's sufficient balance and coverage`,
                 },
               },
             ],

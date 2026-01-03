@@ -94,7 +94,7 @@ describe('MCP Protocol Endpoints', () => {
         expect(Array.isArray(response.body.result.tools)).toBe(true);
       });
 
-      it('should return at least 20 tools', async () => {
+      it('should return at least 35 tools (v3.0 with new tools)', async () => {
         const response = await request(app)
           .post('/mcp')
           .send({
@@ -104,7 +104,8 @@ describe('MCP Protocol Endpoints', () => {
           })
           .expect(200);
 
-        expect(response.body.result.tools.length).toBeGreaterThanOrEqual(20);
+        // v3.0 has 38 tools (25 original + 13 new)
+        expect(response.body.result.tools.length).toBeGreaterThanOrEqual(35);
       });
 
       it('should include expected Tanda tools', async () => {
@@ -358,9 +359,13 @@ describe('MCP Tool Definitions', () => {
     { prefix: 'tanda_get_schedules', description: 'scheduling' },
     { prefix: 'tanda_get_shifts', description: 'shifts' },
     { prefix: 'tanda_get_leave_requests', description: 'leave' },
-    { prefix: 'tanda_clock_in', description: 'clock in/out' },
-    { prefix: 'tanda_get_qualifications', description: 'qualifications' },
     { prefix: 'tanda_get_roster_costs', description: 'costs' },
+    // v3.0 New Tools
+    { prefix: 'tanda_get_active_shifts', description: 'active shifts (v3)' },
+    { prefix: 'tanda_get_clocked_in_users', description: 'clocked-in users (v3)' },
+    { prefix: 'tanda_get_current_roster', description: 'current roster (v3)' },
+    { prefix: 'tanda_get_inactive_users', description: 'inactive users (v3)' },
+    { prefix: 'tanda_get_leave_types', description: 'leave types (v3)' },
   ];
 
   toolCategories.forEach(({ prefix, description }) => {
@@ -376,6 +381,221 @@ describe('MCP Tool Definitions', () => {
 
       const toolNames = response.body.result.tools.map((t: { name: string }) => t.name);
       expect(toolNames).toContain(prefix);
+    });
+  });
+});
+
+// v3.0 New Feature Tests
+describe('MCP v3.0 New Features', () => {
+  let app: Application;
+
+  beforeAll(() => {
+    app = createApp();
+  });
+
+  describe('v3.0 Real-time Attendance Tools', () => {
+    const v3AttendanceTools = [
+      'tanda_get_active_shifts',
+      'tanda_get_clocked_in_users',
+      'tanda_get_shift_breaks',
+      'tanda_get_shift_limits',
+    ];
+
+    v3AttendanceTools.forEach((toolName) => {
+      it(`should have ${toolName} tool defined`, async () => {
+        const response = await request(app)
+          .post('/mcp')
+          .send({
+            jsonrpc: '2.0',
+            id: 1,
+            method: 'tools/list',
+          })
+          .expect(200);
+
+        const tool = response.body.result.tools.find((t: { name: string }) => t.name === toolName);
+        expect(tool).toBeDefined();
+        expect(tool).toHaveProperty('description');
+        expect(tool).toHaveProperty('inputSchema');
+      });
+    });
+  });
+
+  describe('v3.0 Roster Period Tools', () => {
+    const v3RosterTools = [
+      'tanda_get_roster',
+      'tanda_get_current_roster',
+      'tanda_get_roster_by_date',
+    ];
+
+    v3RosterTools.forEach((toolName) => {
+      it(`should have ${toolName} tool defined`, async () => {
+        const response = await request(app)
+          .post('/mcp')
+          .send({
+            jsonrpc: '2.0',
+            id: 1,
+            method: 'tools/list',
+          })
+          .expect(200);
+
+        const tool = response.body.result.tools.find((t: { name: string }) => t.name === toolName);
+        expect(tool).toBeDefined();
+      });
+    });
+  });
+
+  describe('v3.0 Staff Management Tools', () => {
+    const v3StaffTools = [
+      'tanda_get_inactive_users',
+      'tanda_onboard_users',
+      'tanda_invite_user',
+    ];
+
+    v3StaffTools.forEach((toolName) => {
+      it(`should have ${toolName} tool defined`, async () => {
+        const response = await request(app)
+          .post('/mcp')
+          .send({
+            jsonrpc: '2.0',
+            id: 1,
+            method: 'tools/list',
+          })
+          .expect(200);
+
+        const tool = response.body.result.tools.find((t: { name: string }) => t.name === toolName);
+        expect(tool).toBeDefined();
+      });
+    });
+
+    it('should have onboard_users with proper schema for bulk operations', async () => {
+      const response = await request(app)
+        .post('/mcp')
+        .send({
+          jsonrpc: '2.0',
+          id: 1,
+          method: 'tools/list',
+        })
+        .expect(200);
+
+      const tool = response.body.result.tools.find(
+        (t: { name: string }) => t.name === 'tanda_onboard_users'
+      );
+      expect(tool).toBeDefined();
+      expect(tool.inputSchema.properties).toHaveProperty('users');
+      expect(tool.inputSchema.required).toContain('users');
+    });
+  });
+
+  describe('v3.0 Leave Enhancement Tools', () => {
+    const v3LeaveTools = [
+      'tanda_get_leave_types',
+      'tanda_calculate_leave_hours',
+    ];
+
+    v3LeaveTools.forEach((toolName) => {
+      it(`should have ${toolName} tool defined`, async () => {
+        const response = await request(app)
+          .post('/mcp')
+          .send({
+            jsonrpc: '2.0',
+            id: 1,
+            method: 'tools/list',
+          })
+          .expect(200);
+
+        const tool = response.body.result.tools.find((t: { name: string }) => t.name === toolName);
+        expect(tool).toBeDefined();
+      });
+    });
+  });
+
+  describe('v3.0 Prompts', () => {
+    it('should list v3.0 prompts', async () => {
+      const response = await request(app)
+        .post('/mcp')
+        .send({
+          jsonrpc: '2.0',
+          id: 1,
+          method: 'prompts/list',
+        })
+        .expect(200);
+
+      const promptNames = response.body.result.prompts.map((p: { name: string }) => p.name);
+
+      // v3.0 New Prompts
+      expect(promptNames).toContain('workforce_dashboard');
+      expect(promptNames).toContain('compliance_check');
+      expect(promptNames).toContain('onboard_employee');
+      expect(promptNames).toContain('leave_planner');
+    });
+
+    it('should get workforce_dashboard prompt', async () => {
+      const response = await request(app)
+        .post('/mcp')
+        .send({
+          jsonrpc: '2.0',
+          id: 1,
+          method: 'prompts/get',
+          params: {
+            name: 'workforce_dashboard',
+          },
+        })
+        .expect(200);
+
+      expect(response.body.result).toHaveProperty('messages');
+      expect(response.body.result.messages[0].content.text).toContain('tanda_get_active_shifts');
+    });
+
+    it('should get compliance_check prompt with arguments', async () => {
+      const response = await request(app)
+        .post('/mcp')
+        .send({
+          jsonrpc: '2.0',
+          id: 1,
+          method: 'prompts/get',
+          params: {
+            name: 'compliance_check',
+            arguments: {
+              date: '2024-01-15',
+              user_id: '123',
+            },
+          },
+        })
+        .expect(200);
+
+      expect(response.body.result).toHaveProperty('messages');
+      expect(response.body.result.messages[0].content.text).toContain('2024-01-15');
+      expect(response.body.result.messages[0].content.text).toContain('123');
+    });
+  });
+
+  describe('v3.0 Tool Count', () => {
+    it('should have exactly 38 tools in v3.0', async () => {
+      const response = await request(app)
+        .post('/mcp')
+        .send({
+          jsonrpc: '2.0',
+          id: 1,
+          method: 'tools/list',
+        })
+        .expect(200);
+
+      // v3.0: 25 original + 13 new = 38 tools
+      expect(response.body.result.tools.length).toBe(38);
+    });
+
+    it('should have 6 prompts in v3.0', async () => {
+      const response = await request(app)
+        .post('/mcp')
+        .send({
+          jsonrpc: '2.0',
+          id: 1,
+          method: 'prompts/list',
+        })
+        .expect(200);
+
+      // v3.0: 2 original + 4 new = 6 prompts
+      expect(response.body.result.prompts.length).toBe(6);
     });
   });
 });

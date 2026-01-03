@@ -314,3 +314,117 @@ export interface TimesheetFilter extends DateRangeFilter {
   approved?: boolean;
   include_costs?: boolean;
 }
+
+// ==================== v3.0 New Types ====================
+
+// Active Shift - currently in progress shift
+export interface TandaActiveShift {
+  id: number;
+  user_id: number;
+  user_name?: string;
+  start: string;
+  department_id?: number;
+  department_name?: string;
+  status: 'active' | 'on_break';
+  break_start?: string;
+  current_duration_minutes?: number;
+}
+
+// Roster Period - weekly roster container
+export interface TandaRoster {
+  id: number;
+  start: string;  // Start of roster period (usually Monday)
+  finish: string; // End of roster period (usually Sunday)
+  schedules_count?: number;
+  published?: boolean;
+  cost?: number;
+  department_ids?: number[];
+}
+
+// Leave Type - available leave types for a user
+export interface TandaLeaveType {
+  id: number;
+  name: string;
+  leave_type?: string;
+  paid?: boolean;
+  unit?: 'hours' | 'days';
+  accrual_rate?: number;
+  requires_approval?: boolean;
+  colour?: string;
+}
+
+// Leave Hours Calculation
+export interface TandaLeaveHoursResult {
+  hours: number;
+  days?: number;
+  start: string;
+  finish: string;
+  leave_type: string;
+  user_id: number;
+}
+
+// Shift Break - break within a shift
+export interface TandaShiftBreak {
+  id: number;
+  shift_id: number;
+  start: string;
+  finish?: string;
+  length?: number; // in minutes
+  paid: boolean;
+  status?: 'completed' | 'in_progress';
+}
+
+// Shift Limits - hour limits and warnings
+export interface TandaShiftLimits {
+  user_id: number;
+  daily_limit_hours?: number;
+  weekly_limit_hours?: number;
+  current_daily_hours?: number;
+  current_weekly_hours?: number;
+  overtime_threshold?: number;
+  warnings?: string[];
+}
+
+// User Onboarding Request
+export interface OnboardUserRequest {
+  email: string;
+  name: string;
+  phone?: string;
+  department_ids?: number[];
+  employment_start_date?: string;
+  send_invite?: boolean;
+  custom_fields?: Record<string, unknown>;
+}
+
+// User Onboarding Response
+export interface TandaOnboardingResult {
+  id: number;
+  email: string;
+  name: string;
+  status: 'pending' | 'invited' | 'completed';
+  invite_sent_at?: string;
+  errors?: string[];
+}
+
+// Bulk Onboarding Request
+export interface BulkOnboardRequest {
+  users: OnboardUserRequest[];
+}
+
+// Bulk Onboarding Response
+export interface TandaBulkOnboardingResult {
+  successful: TandaOnboardingResult[];
+  failed: Array<{
+    email: string;
+    errors: string[];
+  }>;
+  total_processed: number;
+}
+
+// User Invite Result
+export interface TandaUserInviteResult {
+  user_id: number;
+  email: string;
+  invite_sent: boolean;
+  invite_sent_at?: string;
+}

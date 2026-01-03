@@ -1,5 +1,24 @@
 import { TandaClient, TandaApiError } from '../tanda/client';
 import { logger } from '../utils/logger';
+import { config } from '../config/environment';
+
+// v3.0: Write tools that are blocked in read-only mode
+const WRITE_TOOLS = new Set([
+  'tanda_create_schedule',
+  'tanda_update_schedule',
+  'tanda_delete_schedule',
+  'tanda_publish_schedules',
+  'tanda_approve_shift',
+  'tanda_approve_timesheet',
+  'tanda_create_leave_request',
+  'tanda_approve_leave',
+  'tanda_decline_leave',
+  'tanda_delete_leave_request',
+  'tanda_create_unavailability',
+  'tanda_delete_unavailability',
+  'tanda_onboard_users',
+  'tanda_invite_user',
+]);
 
 // MCP Tool Definitions
 export interface MCPTool {
@@ -540,6 +559,212 @@ export const tandaTools: MCPTool[] = [
     },
   },
 
+  // ==================== v3.0 New Tools ====================
+
+  // Real-time Attendance
+  {
+    name: 'tanda_get_active_shifts',
+    description: 'Get currently active shifts - shows who is currently working in real-time',
+    inputSchema: {
+      type: 'object',
+      properties: {},
+    },
+  },
+  {
+    name: 'tanda_get_clocked_in_users',
+    description: 'Get all users who are currently clocked in - real-time attendance status',
+    inputSchema: {
+      type: 'object',
+      properties: {},
+    },
+  },
+  {
+    name: 'tanda_get_shift_breaks',
+    description: 'Get breaks for a specific shift - useful for compliance tracking',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        shift_id: {
+          type: 'number',
+          description: 'The shift ID to get breaks for',
+        },
+      },
+      required: ['shift_id'],
+    },
+  },
+  {
+    name: 'tanda_get_shift_limits',
+    description: 'Get shift hour limits and warnings for users - helps prevent overtime violations',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        user_ids: {
+          type: 'array',
+          items: { type: 'number' },
+          description: 'Filter by specific user IDs',
+        },
+      },
+    },
+  },
+
+  // Roster Periods
+  {
+    name: 'tanda_get_roster',
+    description: 'Get a specific roster period by ID',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        roster_id: {
+          type: 'number',
+          description: 'The roster ID to retrieve',
+        },
+      },
+      required: ['roster_id'],
+    },
+  },
+  {
+    name: 'tanda_get_current_roster',
+    description: 'Get the current active roster period',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        show_costs: {
+          type: 'boolean',
+          description: 'Include cost calculations for the roster',
+        },
+      },
+    },
+  },
+  {
+    name: 'tanda_get_roster_by_date',
+    description: 'Get the roster period that contains a specific date',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        date: {
+          type: 'string',
+          description: 'Date in YYYY-MM-DD format',
+        },
+        show_costs: {
+          type: 'boolean',
+          description: 'Include cost calculations for the roster',
+        },
+      },
+      required: ['date'],
+    },
+  },
+
+  // Staff Management
+  {
+    name: 'tanda_get_inactive_users',
+    description: 'Get all inactive/terminated users - useful for HR reporting',
+    inputSchema: {
+      type: 'object',
+      properties: {},
+    },
+  },
+  {
+    name: 'tanda_onboard_users',
+    description: 'Bulk onboard new employees - creates user accounts and sends invitations',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        users: {
+          type: 'array',
+          description: 'Array of users to onboard',
+          items: {
+            type: 'object',
+            properties: {
+              email: {
+                type: 'string',
+                description: 'User email address (required)',
+              },
+              name: {
+                type: 'string',
+                description: 'User full name (required)',
+              },
+              phone: {
+                type: 'string',
+                description: 'User phone number',
+              },
+              department_ids: {
+                type: 'array',
+                items: { type: 'number' },
+                description: 'Department IDs to assign user to',
+              },
+              employment_start_date: {
+                type: 'string',
+                description: 'Employment start date in YYYY-MM-DD format',
+              },
+              send_invite: {
+                type: 'boolean',
+                description: 'Whether to send invitation email (default: true)',
+              },
+            },
+            required: ['email', 'name'],
+          },
+        },
+      },
+      required: ['users'],
+    },
+  },
+  {
+    name: 'tanda_invite_user',
+    description: 'Send an app invitation to an existing user',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        user_id: {
+          type: 'number',
+          description: 'The user ID to send invitation to',
+        },
+      },
+      required: ['user_id'],
+    },
+  },
+
+  // Leave Enhancements
+  {
+    name: 'tanda_get_leave_types',
+    description: 'Get available leave types for a specific user',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        user_id: {
+          type: 'number',
+          description: 'The user ID to get leave types for',
+        },
+      },
+      required: ['user_id'],
+    },
+  },
+  {
+    name: 'tanda_calculate_leave_hours',
+    description: 'Calculate the number of leave hours between two dates for a user',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        user_id: {
+          type: 'number',
+          description: 'The user ID to calculate leave for',
+        },
+        start: {
+          type: 'string',
+          description: 'Leave start date in YYYY-MM-DD format',
+        },
+        finish: {
+          type: 'string',
+          description: 'Leave end date in YYYY-MM-DD format',
+        },
+        leave_type: {
+          type: 'string',
+          description: 'Type of leave (e.g., "annual", "sick")',
+        },
+      },
+      required: ['user_id', 'start', 'finish', 'leave_type'],
+    },
+  },
+
   // Award Interpretation & Costs
   {
     name: 'tanda_get_award_interpretation',
@@ -592,6 +817,22 @@ export const tandaTools: MCPTool[] = [
   // See docs/FIT_GAP_ANALYSIS.md for details on OAuth scope limitations
 ];
 
+// v3.0: Check if tool is allowed based on read-only mode
+export function isToolAllowed(toolName: string): boolean {
+  if (config.MCP_READ_ONLY_MODE && WRITE_TOOLS.has(toolName)) {
+    return false;
+  }
+  return true;
+}
+
+// v3.0: Get filtered tools list based on read-only mode
+export function getAvailableTools(): MCPTool[] {
+  if (config.MCP_READ_ONLY_MODE) {
+    return tandaTools.filter(tool => !WRITE_TOOLS.has(tool.name));
+  }
+  return tandaTools;
+}
+
 // Tool execution handler
 export async function executeTool(
   client: TandaClient,
@@ -599,6 +840,16 @@ export async function executeTool(
   args: Record<string, unknown>
 ): Promise<{ content: unknown; isError?: boolean }> {
   logger.debug(`Executing tool: ${toolName}`, { args });
+
+  // v3.0: Check read-only mode
+  if (config.MCP_READ_ONLY_MODE && WRITE_TOOLS.has(toolName)) {
+    return {
+      content: {
+        error: `Tool '${toolName}' is not available in read-only mode. Write operations are disabled.`,
+      },
+      isError: true,
+    };
+  }
 
   try {
     switch (toolName) {
@@ -806,6 +1057,73 @@ export async function executeTool(
             to: args.to as string,
             department_ids: args.department_ids as number[] | undefined,
           }),
+        };
+
+      // ==================== v3.0 New Tool Handlers ====================
+
+      // Real-time Attendance
+      case 'tanda_get_active_shifts':
+        return { content: await client.getActiveShifts() };
+
+      case 'tanda_get_clocked_in_users':
+        return { content: await client.getClockedInUsers() };
+
+      case 'tanda_get_shift_breaks':
+        return { content: await client.getShiftBreaks(args.shift_id as number) };
+
+      case 'tanda_get_shift_limits':
+        return {
+          content: await client.getShiftLimits(args.user_ids as number[] | undefined),
+        };
+
+      // Roster Periods
+      case 'tanda_get_roster':
+        return { content: await client.getRoster(args.roster_id as number) };
+
+      case 'tanda_get_current_roster':
+        return { content: await client.getCurrentRoster(args.show_costs as boolean | undefined) };
+
+      case 'tanda_get_roster_by_date':
+        return {
+          content: await client.getRosterByDate(
+            args.date as string,
+            args.show_costs as boolean | undefined
+          ),
+        };
+
+      // Staff Management
+      case 'tanda_get_inactive_users':
+        return { content: await client.getInactiveUsers() };
+
+      case 'tanda_onboard_users':
+        return {
+          content: await client.onboardUsers(
+            args.users as Array<{
+              email: string;
+              name: string;
+              phone?: string;
+              department_ids?: number[];
+              employment_start_date?: string;
+              send_invite?: boolean;
+            }>
+          ),
+        };
+
+      case 'tanda_invite_user':
+        return { content: await client.inviteUser(args.user_id as number) };
+
+      // Leave Enhancements
+      case 'tanda_get_leave_types':
+        return { content: await client.getLeaveTypes(args.user_id as number) };
+
+      case 'tanda_calculate_leave_hours':
+        return {
+          content: await client.calculateLeaveHours(
+            args.user_id as number,
+            args.start as string,
+            args.finish as string,
+            args.leave_type as string
+          ),
         };
 
       // Note: Clock In/Out and Qualifications handlers removed - require unsupported OAuth scopes
