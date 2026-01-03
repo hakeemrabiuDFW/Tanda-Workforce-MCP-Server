@@ -105,7 +105,23 @@ export function createApp(): Application {
   });
 
   // POST / - Handle MCP requests at root (Claude sends here after SSE connection)
-  app.post('/', optionalAuth, createMCPRouter());
+  // Authentication required except for 'initialize' (protocol handshake)
+  app.post('/', optionalAuth, (req: Request, res: Response, next: NextFunction) => {
+    const method = req.body?.method;
+
+    // Allow 'initialize' without auth for protocol handshake
+    // All other methods require authentication to trigger OAuth flow
+    if (method !== 'initialize' && !req.auth?.tandaClient) {
+      res.setHeader('WWW-Authenticate', 'Bearer');
+      res.status(401).json({
+        error: 'unauthorized',
+        error_description: 'Authentication required. Please complete OAuth flow.',
+      });
+      return;
+    }
+
+    next();
+  }, createMCPRouter());
 
   // ==================== OAuth Routes ====================
 
@@ -463,7 +479,18 @@ export function createApp(): Application {
   // ==================== MCP Endpoint ====================
 
   // GET /mcp - SSE endpoint for server-to-client messages (required for remote MCP)
+  // This endpoint REQUIRES authentication to trigger OAuth flow in Claude.ai
   app.get('/mcp', optionalAuth, (req: Request, res: Response) => {
+    // Check if user is authenticated - if not, return 401 to trigger OAuth flow
+    if (!req.auth?.tandaClient) {
+      res.setHeader('WWW-Authenticate', 'Bearer');
+      res.status(401).json({
+        error: 'unauthorized',
+        error_description: 'Authentication required. Please complete OAuth flow.',
+      });
+      return;
+    }
+
     // Set comprehensive SSE headers for proxy compatibility
     res.setHeader('Content-Type', 'text/event-stream');
     res.setHeader('Cache-Control', 'no-cache, no-store, must-revalidate');
@@ -540,8 +567,24 @@ export function createApp(): Application {
     logger.info('SSE client connected to /mcp');
   });
 
-  // POST /mcp - MCP protocol endpoint (authentication optional for initialize/list)
-  app.post('/mcp', optionalAuth, createMCPRouter());
+  // POST /mcp - MCP protocol endpoint
+  // Authentication required except for 'initialize' (protocol handshake)
+  app.post('/mcp', optionalAuth, (req: Request, res: Response, next: NextFunction) => {
+    const method = req.body?.method;
+
+    // Allow 'initialize' without auth for protocol handshake
+    // All other methods require authentication to trigger OAuth flow
+    if (method !== 'initialize' && !req.auth?.tandaClient) {
+      res.setHeader('WWW-Authenticate', 'Bearer');
+      res.status(401).json({
+        error: 'unauthorized',
+        error_description: 'Authentication required. Please complete OAuth flow.',
+      });
+      return;
+    }
+
+    next();
+  }, createMCPRouter());
 
   // ==================== Protected API Routes ====================
 
