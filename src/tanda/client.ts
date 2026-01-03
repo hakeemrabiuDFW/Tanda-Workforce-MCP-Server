@@ -16,10 +16,15 @@ import {
   TandaUnavailability,
   TandaTeam,
   TandaDailyStats,
+  TandaClockIn,
+  TandaQualification,
+  TandaUserQualification,
   CreateScheduleRequest,
   UpdateScheduleRequest,
   CreateLeaveRequest,
   CreateUnavailabilityRequest,
+  ClockInRequest,
+  ClockFilter,
   DateRangeFilter,
   ScheduleFilter,
   TimesheetFilter,
@@ -658,6 +663,87 @@ export class TandaClient {
       logger.warn('Roster costs not available:', error instanceof Error ? error.message : 'Unknown error');
       logger.debug('Roster costs require "roster" and "cost" OAuth scopes');
       return [];
+    }
+  }
+
+  // ==================== Clock In/Out ====================
+
+  async getClockIns(filter: ClockFilter): Promise<TandaClockIn[]> {
+    const params = new URLSearchParams({
+      from: filter.from,
+      to: filter.to,
+    });
+    if (filter.user_ids?.length) params.append('user_ids', filter.user_ids.join(','));
+
+    try {
+      const response = await this.client.get<TandaClockIn[]>('/clockins', { params });
+      return response.data;
+    } catch {
+      // Alternative endpoint
+      try {
+        const response = await this.client.get<TandaClockIn[]>('/clock_ins', { params });
+        return response.data;
+      } catch {
+        logger.warn('Clock ins endpoint not available');
+        return [];
+      }
+    }
+  }
+
+  async clockIn(data: ClockInRequest): Promise<TandaClockIn> {
+    const payload = {
+      user_id: data.user_id,
+      time: data.time || new Date().toISOString(),
+      type: data.type,
+      department_id: data.department_id,
+      latitude: data.latitude,
+      longitude: data.longitude,
+      photo: data.photo,
+    };
+
+    try {
+      const response = await this.client.post<TandaClockIn>('/clockins', payload);
+      return response.data;
+    } catch {
+      // Alternative endpoint
+      const response = await this.client.post<TandaClockIn>('/clock_ins', payload);
+      return response.data;
+    }
+  }
+
+  // ==================== Qualifications ====================
+
+  async getQualifications(): Promise<TandaQualification[]> {
+    try {
+      const response = await this.client.get<TandaQualification[]>('/qualifications');
+      return response.data;
+    } catch {
+      logger.warn('Qualifications endpoint not available');
+      return [];
+    }
+  }
+
+  async getQualification(qualificationId: number): Promise<TandaQualification> {
+    const response = await this.client.get<TandaQualification>(`/qualifications/${qualificationId}`);
+    return response.data;
+  }
+
+  async getUserQualifications(userId: number): Promise<TandaUserQualification[]> {
+    try {
+      // Primary endpoint: user qualifications
+      const response = await this.client.get<TandaUserQualification[]>(`/users/${userId}/qualifications`);
+      return response.data;
+    } catch {
+      try {
+        // Alternative: query by user_id
+        const response = await this.client.get<TandaUserQualification[]>('/qualifications', {
+          params: { user_id: userId },
+        });
+        return response.data;
+      } catch {
+        logger.warn(`User qualifications endpoint not available for user ${userId}`);
+        return [];
+      }
     }
   }
 

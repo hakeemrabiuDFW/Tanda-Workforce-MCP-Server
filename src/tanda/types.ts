@@ -293,6 +293,21 @@ export interface DateRangeFilter {
   to: string;
 }
 
+// Clock operations request types
+export interface ClockInRequest {
+  user_id: number;
+  time?: string; // ISO 8601 format, defaults to now
+  type: 'start' | 'finish' | 'break_start' | 'break_finish';
+  department_id?: number;
+  latitude?: number;
+  longitude?: number;
+  photo?: string;
+}
+
+export interface ClockFilter extends DateRangeFilter {
+  user_ids?: number[];
+}
+
 export interface UserFilter {
   user_ids?: number[];
   department_ids?: number[];

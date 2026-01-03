@@ -587,6 +587,90 @@ export const tandaTools: MCPTool[] = [
       required: ['from', 'to'],
     },
   },
+
+  // Clock In/Out Operations
+  {
+    name: 'tanda_clock_in',
+    description: 'Record a clock in/out event for an employee (start shift, end shift, start break, end break)',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        user_id: {
+          type: 'number',
+          description: 'The user ID to clock in/out',
+        },
+        type: {
+          type: 'string',
+          enum: ['start', 'finish', 'break_start', 'break_finish'],
+          description: 'Type of clock event: start (clock in), finish (clock out), break_start, break_finish',
+        },
+        time: {
+          type: 'string',
+          description: 'Optional: ISO 8601 timestamp for the clock event (defaults to current time)',
+        },
+        department_id: {
+          type: 'number',
+          description: 'Optional: department ID for the clock event',
+        },
+        latitude: {
+          type: 'number',
+          description: 'Optional: GPS latitude for location verification',
+        },
+        longitude: {
+          type: 'number',
+          description: 'Optional: GPS longitude for location verification',
+        },
+      },
+      required: ['user_id', 'type'],
+    },
+  },
+  {
+    name: 'tanda_get_clock_ins',
+    description: 'Get clock in/out records for a date range',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        from: {
+          type: 'string',
+          description: 'Start date in YYYY-MM-DD format',
+        },
+        to: {
+          type: 'string',
+          description: 'End date in YYYY-MM-DD format',
+        },
+        user_ids: {
+          type: 'array',
+          items: { type: 'number' },
+          description: 'Filter by specific user IDs',
+        },
+      },
+      required: ['from', 'to'],
+    },
+  },
+
+  // Qualifications
+  {
+    name: 'tanda_get_qualifications',
+    description: 'Get all qualification types defined in the organization',
+    inputSchema: {
+      type: 'object',
+      properties: {},
+    },
+  },
+  {
+    name: 'tanda_get_user_qualifications',
+    description: 'Get qualifications held by a specific user',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        user_id: {
+          type: 'number',
+          description: 'The user ID to get qualifications for',
+        },
+      },
+      required: ['user_id'],
+    },
+  },
 ];
 
 // Tool execution handler
@@ -804,6 +888,35 @@ export async function executeTool(
             department_ids: args.department_ids as number[] | undefined,
           }),
         };
+
+      // Clock In/Out
+      case 'tanda_clock_in':
+        return {
+          content: await client.clockIn({
+            user_id: args.user_id as number,
+            type: args.type as 'start' | 'finish' | 'break_start' | 'break_finish',
+            time: args.time as string | undefined,
+            department_id: args.department_id as number | undefined,
+            latitude: args.latitude as number | undefined,
+            longitude: args.longitude as number | undefined,
+          }),
+        };
+
+      case 'tanda_get_clock_ins':
+        return {
+          content: await client.getClockIns({
+            from: args.from as string,
+            to: args.to as string,
+            user_ids: args.user_ids as number[] | undefined,
+          }),
+        };
+
+      // Qualifications
+      case 'tanda_get_qualifications':
+        return { content: await client.getQualifications() };
+
+      case 'tanda_get_user_qualifications':
+        return { content: await client.getUserQualifications(args.user_id as number) };
 
       default:
         return {
