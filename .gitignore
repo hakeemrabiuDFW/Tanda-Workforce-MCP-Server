@@ -40,3 +40,5 @@ coverage/
 
 # Optional eslint cache
 .eslintcache
+# Local MCP config with auth tokens
+.mcp.local.json
