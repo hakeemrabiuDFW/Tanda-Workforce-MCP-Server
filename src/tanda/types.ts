@@ -293,6 +293,8 @@ export interface DateRangeFilter {
   to: string;
 }
 
+// Note: ClockInRequest and ClockFilter removed - require OAuth scopes not supported by Workforce.com
+
 export interface UserFilter {
   user_ids?: number[];
   department_ids?: number[];

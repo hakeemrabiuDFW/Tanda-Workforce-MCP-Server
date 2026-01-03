@@ -1,6 +1,8 @@
-# Tanda Workforce MCP Server - Deployment Guide
+# Tanda Workforce MCP Server v2.0 - Deployment Guide
 
 This guide covers deploying the Tanda Workforce MCP Server with OAuth2 authentication for use with Claude.ai and Claude Desktop.
+
+> **Version 2.0** - Now with 30+ tools, improved SSE stability, and full RFC compliance for OAuth.
 
 ## Table of Contents
 
@@ -424,35 +426,75 @@ curl -s -X POST "$BASE_URL/mcp" \
 
 ---
 
-## Available MCP Tools
+## Available MCP Tools (30+)
 
+### User Management
 | Tool | Description |
 |------|-------------|
 | `tanda_get_current_user` | Get authenticated user's profile |
 | `tanda_get_users` | List all users/employees |
 | `tanda_get_user` | Get specific user by ID |
+
+### Organization
+| Tool | Description |
+|------|-------------|
 | `tanda_get_departments` | List all departments |
 | `tanda_get_locations` | List all locations |
+| `tanda_get_teams` | List all teams |
+| `tanda_get_staff_by_department` | Get staff in a department |
+
+### Scheduling
+| Tool | Description |
+|------|-------------|
 | `tanda_get_schedules` | Get scheduled shifts |
 | `tanda_create_schedule` | Create a new shift |
 | `tanda_update_schedule` | Update existing shift |
 | `tanda_delete_schedule` | Delete a shift |
 | `tanda_publish_schedules` | Publish schedules to staff |
+
+### Timesheets
+| Tool | Description |
+|------|-------------|
 | `tanda_get_shifts` | Get worked shifts (timesheet) |
 | `tanda_get_timesheets` | Get timesheets with approval status |
 | `tanda_approve_shift` | Approve a shift |
 | `tanda_approve_timesheet` | Approve a timesheet |
+
+### Leave Management
+| Tool | Description |
+|------|-------------|
 | `tanda_get_leave_requests` | Get leave requests |
 | `tanda_create_leave_request` | Create leave request |
 | `tanda_approve_leave` | Approve leave request |
 | `tanda_decline_leave` | Decline leave request |
+| `tanda_delete_leave_request` | Delete leave request |
 | `tanda_get_leave_balances` | Get user's leave balances |
-| `tanda_clock_in` | Clock in/out operations |
-| `tanda_get_clock_ins` | Get clock records |
-| `tanda_get_qualifications` | List qualification types |
+
+### Clock In/Out
+| Tool | Description |
+|------|-------------|
+| `tanda_clock_in` | Record clock in/out event (start, finish, break_start, break_finish) |
+| `tanda_get_clock_ins` | Get clock records for date range |
+
+### Unavailability
+| Tool | Description |
+|------|-------------|
+| `tanda_get_unavailability` | Get unavailability records |
+| `tanda_create_unavailability` | Create unavailability record |
+| `tanda_delete_unavailability` | Delete unavailability record |
+
+### Qualifications
+| Tool | Description |
+|------|-------------|
+| `tanda_get_qualifications` | List all qualification types |
 | `tanda_get_user_qualifications` | Get user's qualifications |
+
+### Costs & Statistics
+| Tool | Description |
+|------|-------------|
 | `tanda_get_award_interpretation` | Get pay calculations |
 | `tanda_get_roster_costs` | Get labor costs |
+| `tanda_get_daily_stats` | Get daily workforce statistics |
 
 ---
 

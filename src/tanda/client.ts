@@ -16,6 +16,9 @@ import {
   TandaUnavailability,
   TandaTeam,
   TandaDailyStats,
+  TandaClockIn,
+  TandaQualification,
+  TandaUserQualification,
   CreateScheduleRequest,
   UpdateScheduleRequest,
   CreateLeaveRequest,
@@ -660,6 +663,9 @@ export class TandaClient {
       return [];
     }
   }
+
+  // Note: Clock In/Out and Qualifications methods removed - require OAuth scopes not supported by Workforce.com
+  // See docs/FIT_GAP_ANALYSIS.md for details on OAuth scope limitations
 
   // ==================== Data Streams ====================
 

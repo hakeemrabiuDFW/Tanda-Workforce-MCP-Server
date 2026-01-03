@@ -587,6 +587,9 @@ export const tandaTools: MCPTool[] = [
       required: ['from', 'to'],
     },
   },
+
+  // Note: Clock In/Out and Qualifications tools removed - require OAuth scopes not supported by Workforce.com
+  // See docs/FIT_GAP_ANALYSIS.md for details on OAuth scope limitations
 ];
 
 // Tool execution handler
@@ -804,6 +807,8 @@ export async function executeTool(
             department_ids: args.department_ids as number[] | undefined,
           }),
         };
+
+      // Note: Clock In/Out and Qualifications handlers removed - require unsupported OAuth scopes
 
       default:
         return {
