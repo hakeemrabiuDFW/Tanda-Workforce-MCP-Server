@@ -150,9 +150,10 @@ function testTool(toolName: string, category: string, args: Record<string, unkno
   };
 }
 
-// Date helpers
+// Date helpers - using shorter ranges to avoid large response buffers
 const today = new Date().toISOString().split('T')[0];
 const yesterday = new Date(Date.now() - 1 * 24 * 60 * 60 * 1000).toISOString().split('T')[0];
+const threeDaysAgo = new Date(Date.now() - 3 * 24 * 60 * 60 * 1000).toISOString().split('T')[0];
 const lastWeek = new Date(Date.now() - 7 * 24 * 60 * 60 * 1000).toISOString().split('T')[0];
 const nextWeek = new Date(Date.now() + 7 * 24 * 60 * 60 * 1000).toISOString().split('T')[0];
 const nextMonth = new Date(Date.now() + 30 * 24 * 60 * 60 * 1000).toISOString().split('T')[0];
@@ -160,68 +161,37 @@ const nextMonth = new Date(Date.now() + 30 * 24 * 60 * 60 * 1000).toISOString().
 // ==================== Test Configurations ====================
 
 // Original v1 tools (baseline)
+// Note: Using threeDaysAgo for data-heavy endpoints to avoid buffer overflow
+// Note: user_id: 1 and department_id: 1 may not exist - API errors are expected for these
 const v1ReadTools = [
   { name: 'tanda_get_current_user', category: 'User Management', args: {} },
   { name: 'tanda_get_users', category: 'User Management', args: {} },
-  { name: 'tanda_get_user', category: 'User Management', args: { user_id: 1 } },
+  { name: 'tanda_get_user', category: 'User Management', args: { user_id: 1 } }, // May fail - user_id: 1 may not exist
   { name: 'tanda_get_departments', category: 'Organization', args: {} },
   { name: 'tanda_get_locations', category: 'Organization', args: {} },
-  { name: 'tanda_get_schedules', category: 'Scheduling', args: { from: lastWeek, to: today } },
-  { name: 'tanda_get_shifts', category: 'Timesheets', args: { from: lastWeek, to: today } },
-  { name: 'tanda_get_timesheets', category: 'Timesheets', args: { from: lastWeek, to: today } },
+  { name: 'tanda_get_schedules', category: 'Scheduling', args: { from: threeDaysAgo, to: today } },
+  { name: 'tanda_get_shifts', category: 'Timesheets', args: { from: threeDaysAgo, to: today } },
+  { name: 'tanda_get_timesheets', category: 'Timesheets', args: { from: threeDaysAgo, to: today } },
   { name: 'tanda_get_leave_requests', category: 'Leave', args: {} },
-  { name: 'tanda_get_leave_balances', category: 'Leave', args: { user_id: 1 } },
-  { name: 'tanda_get_unavailability', category: 'Unavailability', args: { from: lastWeek, to: today } },
+  { name: 'tanda_get_leave_balances', category: 'Leave', args: { user_id: 1 } }, // May fail - user_id: 1 may not exist
+  { name: 'tanda_get_unavailability', category: 'Unavailability', args: { from: threeDaysAgo, to: today } },
   { name: 'tanda_get_teams', category: 'Organization', args: {} },
-  { name: 'tanda_get_staff_by_department', category: 'Organization', args: { department_id: 1 } },
-  { name: 'tanda_get_daily_stats', category: 'Statistics', args: { from: lastWeek, to: today } },
-  { name: 'tanda_get_award_interpretation', category: 'Costs', args: { from: lastWeek, to: today } },
-  { name: 'tanda_get_roster_costs', category: 'Costs', args: { from: lastWeek, to: today } },
+  { name: 'tanda_get_staff_by_department', category: 'Organization', args: { department_id: 1 } }, // May fail - department_id: 1 may not exist
+  { name: 'tanda_get_daily_stats', category: 'Statistics', args: { from: threeDaysAgo, to: today } },
+  { name: 'tanda_get_award_interpretation', category: 'Costs', args: { from: threeDaysAgo, to: today } },
+  { name: 'tanda_get_roster_costs', category: 'Costs', args: { from: threeDaysAgo, to: today } },
 ];
 
-// New v2 READ tools
-const v2ReadTools = [
-  // Real-time Attendance
-  { name: 'tanda_get_active_shifts', category: 'Real-time Attendance', args: {} },
-  { name: 'tanda_get_clocked_in_users', category: 'Real-time Attendance', args: {} },
-  { name: 'tanda_get_inactive_users', category: 'Real-time Attendance', args: {} },
-
-  // Roster Management
-  { name: 'tanda_get_current_roster', category: 'Roster Management', args: {} },
-  { name: 'tanda_get_roster_by_date', category: 'Roster Management', args: { date: today } },
-  { name: 'tanda_get_roster_by_date', category: 'Roster Management', args: { date: today, show_costs: true } },
-  { name: 'tanda_get_schedule', category: 'Roster Management', args: { schedule_id: 1 } },
-
-  // Timesheet Tools
-  { name: 'tanda_get_user_timesheet', category: 'Timesheet', args: { user_id: 1 } },
-  { name: 'tanda_get_user_timesheet_by_date', category: 'Timesheet', args: { user_id: 1, date: yesterday } },
-  { name: 'tanda_get_shift_breaks', category: 'Timesheet', args: { shift_id: 1 } },
-  { name: 'tanda_get_shift_limits', category: 'Timesheet', args: {} },
-  { name: 'tanda_get_shift_limits', category: 'Timesheet', args: { user_ids: [1, 2] } },
-
-  // Leave Tools
-  { name: 'tanda_get_leave_types', category: 'Leave', args: { user_id: 1 } },
-  { name: 'tanda_calculate_leave_hours', category: 'Leave', args: { user_id: 1, start: nextWeek, finish: nextMonth } },
-
-  // User Management
-  { name: 'tanda_get_user_history', category: 'User Management', args: { user_id: 1 } },
+// Note: V2 management tools were planned but not implemented in v2.0.1
+// These would require additional client methods and tool definitions
+// Keeping as placeholder for future implementation
+const v2ReadTools: Array<{ name: string; category: string; args: Record<string, unknown> }> = [
+  // Future v2 tools would go here
+  // Currently empty - v2.0.1 is a cleanup release that removes OAuth-incompatible tools
 ];
 
-// New v2 WRITE tools (require --write flag)
-const v2WriteTools = [
-  { name: 'tanda_invite_user', category: 'User Management', args: { user_id: 1 } },
-  {
-    name: 'tanda_onboard_users',
-    category: 'Bulk Operations',
-    args: {
-      users: [
-        { name: 'Test User 1', email: 'test1@example.com' },
-        { name: 'Test User 2', email: 'test2@example.com' },
-      ],
-      send_invitations: false,
-    },
-  },
-];
+// Note: V2 write tools (tanda_invite_user, tanda_onboard_users) not implemented in v2.0.1
+const v2WriteTools: Array<{ name: string; category: string; args: Record<string, unknown> }> = [];
 
 // Original v1 write tools
 const v1WriteTools = [
@@ -241,7 +211,7 @@ const v1WriteTools = [
 
 async function runTests() {
   console.log('\n' + '='.repeat(80));
-  console.log('🧪 Tanda MCP Server v2.0 - Comprehensive Tool Testing');
+  console.log('🧪 Tanda MCP Server v2.0.1 - Comprehensive Tool Testing');
   console.log('='.repeat(80));
   console.log(`\n📍 Server: ${BASE_URL}`);
   console.log(`🔑 Auth: ${JWT_TOKEN ? 'Token provided' : 'No token (will show auth_required)'}`);
