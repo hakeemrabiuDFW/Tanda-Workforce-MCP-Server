@@ -112,7 +112,8 @@ export function createApp(): Application {
     // Allow 'initialize' without auth for protocol handshake
     // All other methods require authentication to trigger OAuth flow
     if (method !== 'initialize' && !req.auth?.tandaClient) {
-      res.setHeader('WWW-Authenticate', 'Bearer');
+      const baseUrl = `${req.protocol}://${req.get('host')}`;
+      res.setHeader('WWW-Authenticate', `Bearer resource_metadata="${baseUrl}/.well-known/oauth-protected-resource"`);
       res.status(401).json({
         error: 'unauthorized',
         error_description: 'Authentication required. Please complete OAuth flow.',
@@ -125,7 +126,19 @@ export function createApp(): Application {
 
   // ==================== OAuth Routes ====================
 
-  // OAuth 2.0 Discovery endpoint (RFC 8414)
+  // OAuth 2.0 Protected Resource Metadata (RFC 9728)
+  // This tells Claude.ai where to find the authorization server
+  app.get('/.well-known/oauth-protected-resource', (req: Request, res: Response) => {
+    const baseUrl = `${req.protocol}://${req.get('host')}`;
+    res.json({
+      resource: baseUrl,
+      authorization_servers: [baseUrl],
+      bearer_methods_supported: ['header'],
+      scopes_supported: ['user', 'department', 'leave', 'roster', 'timesheet', 'cost'],
+    });
+  });
+
+  // OAuth 2.0 Authorization Server Metadata (RFC 8414)
   app.get('/.well-known/oauth-authorization-server', (req: Request, res: Response) => {
     const baseUrl = `${req.protocol}://${req.get('host')}`;
     res.json({
@@ -483,7 +496,9 @@ export function createApp(): Application {
   app.get('/mcp', optionalAuth, (req: Request, res: Response) => {
     // Check if user is authenticated - if not, return 401 to trigger OAuth flow
     if (!req.auth?.tandaClient) {
-      res.setHeader('WWW-Authenticate', 'Bearer');
+      const baseUrl = `${req.protocol}://${req.get('host')}`;
+      // Include resource_metadata per RFC 9728 to help Claude.ai discover OAuth
+      res.setHeader('WWW-Authenticate', `Bearer resource_metadata="${baseUrl}/.well-known/oauth-protected-resource"`);
       res.status(401).json({
         error: 'unauthorized',
         error_description: 'Authentication required. Please complete OAuth flow.',
@@ -575,7 +590,8 @@ export function createApp(): Application {
     // Allow 'initialize' without auth for protocol handshake
     // All other methods require authentication to trigger OAuth flow
     if (method !== 'initialize' && !req.auth?.tandaClient) {
-      res.setHeader('WWW-Authenticate', 'Bearer');
+      const baseUrl = `${req.protocol}://${req.get('host')}`;
+      res.setHeader('WWW-Authenticate', `Bearer resource_metadata="${baseUrl}/.well-known/oauth-protected-resource"`);
       res.status(401).json({
         error: 'unauthorized',
         error_description: 'Authentication required. Please complete OAuth flow.',
