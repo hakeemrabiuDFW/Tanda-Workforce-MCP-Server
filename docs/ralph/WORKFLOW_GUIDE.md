@@ -336,32 +336,35 @@ ralph --monitor
 
 ---
 
-## Example: Building QuickBooks MCP Server
+## Example: Building a Workforce MCP Server
 
 ```bash
-# 1. Copy and customize PRD
-cp docs/ralph/PRD_TEMPLATE.md quickbooks-mcp-prd.md
-vim quickbooks-mcp-prd.md  # Fill in QuickBooks-specific details
+# 1. Reference the Tanda PRD as a complete example
+cat docs/ralph/examples/TANDA_MCP_PRD.md
 
-# 2. Import to Ralph
-ralph-import quickbooks-mcp-prd.md quickbooks-mcp-server --template mcp
+# 2. Copy and customize PRD for your API
+cp docs/ralph/PRD_TEMPLATE.md bamboohr-mcp-prd.md
+vim bamboohr-mcp-prd.md  # Fill in BambooHR-specific details
 
-# 3. Run autonomous build
-cd quickbooks-mcp-server
+# 3. Import to Ralph
+ralph-import bamboohr-mcp-prd.md bamboohr-mcp-server --template mcp
+
+# 4. Run autonomous build
+cd bamboohr-mcp-server
 ralph --monitor --timeout 120
 
-# 4. Watch the magic happen
+# 5. Watch the magic happen
 # ... 30-50 iterations later ...
 
-# 5. Deploy
+# 6. Deploy
 railway up
 ```
 
 **Typical Timeline:**
 - Infrastructure: 10-15 iterations
-- Tools (10 tools): 15-25 iterations
+- Tools (20 tools): 20-30 iterations
 - Testing & Polish: 10-15 iterations
-- **Total: 35-55 iterations (~1-2 hours)**
+- **Total: 40-60 iterations (~1-2 hours)**
 
 ---
 

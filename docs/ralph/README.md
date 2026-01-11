@@ -29,7 +29,7 @@ ralph --monitor
 | [PRD_TEMPLATE.md](./PRD_TEMPLATE.md) | MCP server PRD template optimized for Ralph |
 | [PROMPT_TEMPLATE.md](./PROMPT_TEMPLATE.md) | Claude Code instructions template |
 | [WORKFLOW_GUIDE.md](./WORKFLOW_GUIDE.md) | Complete guide to using Ralph for MCP development |
-| [examples/QUICKBOOKS_MCP_PRD.md](./examples/QUICKBOOKS_MCP_PRD.md) | Complete example PRD for QuickBooks MCP server |
+| [examples/TANDA_MCP_PRD.md](./examples/TANDA_MCP_PRD.md) | Complete example PRD for Tanda Workforce MCP server (this repo) |
 
 ## Typical Build Stats
 
