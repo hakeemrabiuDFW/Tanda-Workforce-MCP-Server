@@ -580,8 +580,8 @@ describe('MCP v3.0 New Features', () => {
         })
         .expect(200);
 
-      // v3.0: 25 original + 13 new = 38 tools
-      expect(response.body.result.tools.length).toBe(38);
+      // v3.1: 25 original + 13 new + 6 supervisor optimization = 44 tools
+      expect(response.body.result.tools.length).toBe(44);
     });
 
     it('should have 6 prompts in v3.0', async () => {

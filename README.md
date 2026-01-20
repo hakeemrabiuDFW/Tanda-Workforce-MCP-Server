@@ -1,6 +1,24 @@
-# Tanda Workforce MCP Server v3.0.0
+# Tanda Workforce MCP Server v3.1.0
 
-A production-ready MCP (Model Context Protocol) server for integrating Tanda Workforce API with AI assistants like Claude. Features OAuth2 authentication with PKCE support, real-time workforce tools, and comprehensive workforce management capabilities.
+A production-ready MCP (Model Context Protocol) server for integrating Tanda Workforce API with AI assistants like Claude. Features OAuth2 authentication with PKCE support, real-time workforce tools, supervisor scheduling optimization, and comprehensive workforce management capabilities.
+
+## What's New in v3.1.0
+
+### Supervisor Scheduling Optimization
+Strategic supervisor placement across schools with overlap prevention and evening coverage optimization:
+
+- **Overlap Detection** - `tanda_detect_supervisor_overlaps` - Find schedule conflicts where supervisors are double-booked
+- **Evening Coverage Analysis** - `tanda_analyze_evening_coverage` - Analyze evening (17:00-22:00) coverage across all locations
+- **Placement Recommendations** - `tanda_get_placement_recommendations` - Get AI-powered strategic placement suggestions
+- **Full Optimization** - `tanda_optimize_supervisor_schedules` - Run complete optimization with coverage gap analysis
+- **Schedule Validation** - `tanda_validate_supervisor_schedules` - Validate proposed schedules before creation
+- **Bulk Schedule Creation** - `tanda_create_optimized_schedules` - Create multiple optimized schedules at once
+
+**Key Features:**
+- Prevent supervisor overlaps (no double-booking)
+- Ensure good visibility during evening hours at all schools
+- Strategic placement to maximize coverage
+- Intelligent recommendations based on supervisor availability and managed departments
 
 ## What's New in v3.0.0
 
@@ -42,7 +60,7 @@ A production-ready MCP (Model Context Protocol) server for integrating Tanda Wor
 - **OAuth Protected Resource Metadata** - RFC 9728 for automatic OAuth discovery
 - **SSE Real-time Transport** - Server-Sent Events for MCP remote transport
 - **MCP Protocol Support** - Full JSON-RPC 2.0 implementation (protocol version 2024-11-05)
-- **38 Workforce Tools** - Users, schedules, timesheets, leave, real-time attendance, and more
+- **44 Workforce Tools** - Users, schedules, timesheets, leave, real-time attendance, supervisor optimization, and more
 - **6 Workflow Prompts** - Guided workflows for common tasks
 - **Read-only Mode** - Restrict to read operations only (v3.0)
 - **Production Ready** - Docker support, rate limiting, security headers, logging
@@ -133,7 +151,7 @@ Add to your Claude Desktop config file:
 2. Authenticate with your Tanda account
 3. Copy the returned JWT token
 
-## Available Tools (38)
+## Available Tools (44)
 
 ### User Management
 - `tanda_get_current_user` - Get current user profile
@@ -181,6 +199,14 @@ Add to your Claude Desktop config file:
 - `tanda_get_unavailability` - Get unavailability records
 - `tanda_create_unavailability` - Create unavailability
 - `tanda_delete_unavailability` - Delete unavailability
+
+### Supervisor Scheduling Optimization (v3.1)
+- `tanda_detect_supervisor_overlaps` - Detect schedule overlaps for supervisors
+- `tanda_analyze_evening_coverage` - Analyze evening coverage across all locations
+- `tanda_get_placement_recommendations` - Get strategic placement recommendations
+- `tanda_optimize_supervisor_schedules` - Run full scheduling optimization
+- `tanda_validate_supervisor_schedules` - Validate proposed schedules for conflicts
+- `tanda_create_optimized_schedules` - Create multiple schedules in bulk with validation
 
 ### Organization
 - `tanda_get_departments` - List departments
@@ -269,6 +295,10 @@ src/
     tools.ts
   server/         # Express server setup
     app.ts
+  supervisor/     # Supervisor scheduling optimization (v3.1)
+    optimizer.ts  # Optimization algorithms
+    types.ts      # Type definitions
+    index.ts
   tanda/          # Tanda API client
     client.ts
     types.ts
@@ -294,6 +324,19 @@ See [DEPLOYMENT.md](./DEPLOYMENT.md) for comprehensive deployment instructions i
 - Troubleshooting
 
 ## Changelog
+
+### v3.1.0
+- **NEW**: Supervisor Scheduling Optimization module
+  - `tanda_detect_supervisor_overlaps` - Detect double-bookings and schedule conflicts
+  - `tanda_analyze_evening_coverage` - Analyze evening visibility at all schools
+  - `tanda_get_placement_recommendations` - AI-powered strategic placement suggestions
+  - `tanda_optimize_supervisor_schedules` - Full optimization with coverage gap analysis
+  - `tanda_validate_supervisor_schedules` - Validate schedules before creation
+  - `tanda_create_optimized_schedules` - Bulk schedule creation with validation
+- **NEW**: 44 total tools (6 new supervisor optimization tools)
+- Strategic supervisor placement across schools without overlaps
+- Evening coverage optimization (17:00-22:00)
+- Intelligent recommendations based on supervisor availability
 
 ### v3.0.0
 - **NEW**: Real-time attendance tools (active shifts, clocked-in users, shift breaks, shift limits)

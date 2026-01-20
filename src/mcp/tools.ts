@@ -1,6 +1,8 @@
 import { TandaClient, TandaApiError } from '../tanda/client';
 import { logger } from '../utils/logger';
 import { config } from '../config/environment';
+import { SupervisorOptimizer } from '../supervisor/optimizer';
+import { OptimizationRequest } from '../supervisor/types';
 
 // v3.0: Write tools that are blocked in read-only mode
 const WRITE_TOOLS = new Set([
@@ -18,6 +20,8 @@ const WRITE_TOOLS = new Set([
   'tanda_delete_unavailability',
   'tanda_onboard_users',
   'tanda_invite_user',
+  // v3.1: Supervisor optimization write tools
+  'tanda_create_optimized_schedules',
 ]);
 
 // MCP Tool Definitions
@@ -815,6 +819,198 @@ export const tandaTools: MCPTool[] = [
 
   // Note: Clock In/Out and Qualifications tools removed - require OAuth scopes not supported by Workforce.com
   // See docs/FIT_GAP_ANALYSIS.md for details on OAuth scope limitations
+
+  // ==================== v3.1 Supervisor Scheduling Optimization Tools ====================
+
+  {
+    name: 'tanda_detect_supervisor_overlaps',
+    description: 'Detect schedule overlaps for supervisors - finds conflicts where a supervisor is assigned to multiple locations at the same time',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        from: {
+          type: 'string',
+          description: 'Start date in YYYY-MM-DD format',
+        },
+        to: {
+          type: 'string',
+          description: 'End date in YYYY-MM-DD format',
+        },
+        supervisor_ids: {
+          type: 'array',
+          items: { type: 'number' },
+          description: 'Optional: specific supervisor user IDs to check',
+        },
+      },
+      required: ['from', 'to'],
+    },
+  },
+  {
+    name: 'tanda_analyze_evening_coverage',
+    description: 'Analyze evening coverage (17:00-22:00) across all schools/locations - identifies which locations lack supervisor presence during evening hours',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        date: {
+          type: 'string',
+          description: 'Date to analyze in YYYY-MM-DD format',
+        },
+      },
+      required: ['date'],
+    },
+  },
+  {
+    name: 'tanda_get_placement_recommendations',
+    description: 'Get strategic supervisor placement recommendations - suggests optimal supervisor assignments to maximize coverage and minimize overlaps',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        from: {
+          type: 'string',
+          description: 'Start date in YYYY-MM-DD format',
+        },
+        to: {
+          type: 'string',
+          description: 'End date in YYYY-MM-DD format',
+        },
+        prioritize_evening: {
+          type: 'boolean',
+          description: 'Prioritize evening coverage gaps (default: true)',
+        },
+        location_ids: {
+          type: 'array',
+          items: { type: 'number' },
+          description: 'Optional: specific location/department IDs to focus on',
+        },
+        supervisor_ids: {
+          type: 'array',
+          items: { type: 'number' },
+          description: 'Optional: specific supervisor user IDs to consider',
+        },
+      },
+      required: ['from', 'to'],
+    },
+  },
+  {
+    name: 'tanda_optimize_supervisor_schedules',
+    description: 'Run full supervisor scheduling optimization - analyzes coverage gaps, detects overlaps, and generates an optimized schedule with strategic placements across all schools',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        from: {
+          type: 'string',
+          description: 'Start date in YYYY-MM-DD format',
+        },
+        to: {
+          type: 'string',
+          description: 'End date in YYYY-MM-DD format',
+        },
+        prioritize_evening: {
+          type: 'boolean',
+          description: 'Prioritize evening coverage (17:00-22:00) (default: true)',
+        },
+        max_overlaps_allowed: {
+          type: 'number',
+          description: 'Maximum overlaps allowed before flagging (default: 0)',
+        },
+        location_ids: {
+          type: 'array',
+          items: { type: 'number' },
+          description: 'Optional: specific location/department IDs to include',
+        },
+        supervisor_ids: {
+          type: 'array',
+          items: { type: 'number' },
+          description: 'Optional: specific supervisor user IDs to include',
+        },
+      },
+      required: ['from', 'to'],
+    },
+  },
+  {
+    name: 'tanda_validate_supervisor_schedules',
+    description: 'Validate proposed supervisor schedules for overlaps before creating them',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        schedules: {
+          type: 'array',
+          description: 'Array of proposed schedules to validate',
+          items: {
+            type: 'object',
+            properties: {
+              supervisor_id: {
+                type: 'number',
+                description: 'Supervisor user ID',
+              },
+              department_id: {
+                type: 'number',
+                description: 'Department/location ID',
+              },
+              start: {
+                type: 'string',
+                description: 'Start time in ISO 8601 format',
+              },
+              finish: {
+                type: 'string',
+                description: 'End time in ISO 8601 format',
+              },
+            },
+            required: ['supervisor_id', 'department_id', 'start', 'finish'],
+          },
+        },
+      },
+      required: ['schedules'],
+    },
+  },
+  {
+    name: 'tanda_create_optimized_schedules',
+    description: 'Create multiple supervisor schedules in bulk with overlap validation - strategically places supervisors across schools',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        schedules: {
+          type: 'array',
+          description: 'Array of schedules to create',
+          items: {
+            type: 'object',
+            properties: {
+              supervisor_id: {
+                type: 'number',
+                description: 'Supervisor user ID',
+              },
+              department_id: {
+                type: 'number',
+                description: 'Department/location ID (school)',
+              },
+              start: {
+                type: 'string',
+                description: 'Start time in ISO 8601 format',
+              },
+              finish: {
+                type: 'string',
+                description: 'End time in ISO 8601 format',
+              },
+              notes: {
+                type: 'string',
+                description: 'Optional notes for the schedule',
+              },
+            },
+            required: ['supervisor_id', 'department_id', 'start', 'finish'],
+          },
+        },
+        validate_only: {
+          type: 'boolean',
+          description: 'Only validate without creating schedules (default: false)',
+        },
+        skip_conflicts: {
+          type: 'boolean',
+          description: 'Skip schedules that conflict instead of failing (default: false)',
+        },
+      },
+      required: ['schedules'],
+    },
+  },
 ];
 
 // v3.0: Check if tool is allowed based on read-only mode
@@ -1127,6 +1323,101 @@ export async function executeTool(
         };
 
       // Note: Clock In/Out and Qualifications handlers removed - require unsupported OAuth scopes
+
+      // ==================== v3.1 Supervisor Optimization Tool Handlers ====================
+
+      case 'tanda_detect_supervisor_overlaps': {
+        const optimizer = new SupervisorOptimizer(client);
+        return {
+          content: await optimizer.detectOverlaps(
+            args.from as string,
+            args.to as string,
+            args.supervisor_ids as number[] | undefined
+          ),
+        };
+      }
+
+      case 'tanda_analyze_evening_coverage': {
+        const optimizer = new SupervisorOptimizer(client);
+        return {
+          content: await optimizer.analyzeEveningCoverage(args.date as string),
+        };
+      }
+
+      case 'tanda_get_placement_recommendations': {
+        const optimizer = new SupervisorOptimizer(client);
+        const request: OptimizationRequest = {
+          dateRange: {
+            from: args.from as string,
+            to: args.to as string,
+          },
+          prioritizeEvening: args.prioritize_evening !== false,
+          specificLocationIds: args.location_ids as number[] | undefined,
+          specificSupervisorIds: args.supervisor_ids as number[] | undefined,
+        };
+        return {
+          content: await optimizer.generatePlacementRecommendations(request),
+        };
+      }
+
+      case 'tanda_optimize_supervisor_schedules': {
+        const optimizer = new SupervisorOptimizer(client);
+        const request: OptimizationRequest = {
+          dateRange: {
+            from: args.from as string,
+            to: args.to as string,
+          },
+          prioritizeEvening: args.prioritize_evening !== false,
+          maxOverlapsAllowed: args.max_overlaps_allowed as number | undefined,
+          specificLocationIds: args.location_ids as number[] | undefined,
+          specificSupervisorIds: args.supervisor_ids as number[] | undefined,
+        };
+        return {
+          content: await optimizer.optimize(request),
+        };
+      }
+
+      case 'tanda_validate_supervisor_schedules': {
+        const optimizer = new SupervisorOptimizer(client);
+        const schedules = (args.schedules as Array<{
+          supervisor_id: number;
+          department_id: number;
+          start: string;
+          finish: string;
+        }>).map(s => ({
+          supervisorId: s.supervisor_id,
+          departmentId: s.department_id,
+          start: s.start,
+          finish: s.finish,
+        }));
+        return {
+          content: await optimizer.validateSchedules(schedules),
+        };
+      }
+
+      case 'tanda_create_optimized_schedules': {
+        const optimizer = new SupervisorOptimizer(client);
+        const schedules = (args.schedules as Array<{
+          supervisor_id: number;
+          department_id: number;
+          start: string;
+          finish: string;
+          notes?: string;
+        }>).map(s => ({
+          supervisorId: s.supervisor_id,
+          departmentId: s.department_id,
+          start: s.start,
+          finish: s.finish,
+          notes: s.notes,
+        }));
+        return {
+          content: await optimizer.createBulkSchedules({
+            schedules,
+            validateOnly: args.validate_only as boolean | undefined,
+            skipConflicts: args.skip_conflicts as boolean | undefined,
+          }),
+        };
+      }
 
       default:
         return {
