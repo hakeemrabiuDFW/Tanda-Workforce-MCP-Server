@@ -1,7 +1,11 @@
 import { Request, Response, NextFunction } from 'express';
 import { oauthManager, JWTPayload } from './oauth';
+import { apiKeyManager } from './apikey';
 import { logger } from '../utils/logger';
 import { TandaClient } from '../tanda/client';
+
+// Auth type for tracking authentication method
+export type AuthType = 'jwt' | 'apikey' | 'none';
 
 // Extend Express Request type to include auth info
 declare global {
@@ -11,6 +15,7 @@ declare global {
         payload: JWTPayload;
         sessionId: string;
         tandaClient: TandaClient;
+        authType?: AuthType;
       };
     }
   }
@@ -28,51 +33,46 @@ export function extractBearerToken(req: Request): string | null {
   return parts[1];
 }
 
-// Middleware that requires authentication
-export function requireAuth(req: Request, res: Response, next: NextFunction): void {
-  const token = extractBearerToken(req);
-
-  if (!token) {
-    res.status(401).json({
-      error: 'Unauthorized',
-      message: 'No authentication token provided',
-    });
-    return;
+/**
+ * Extract API key from X-API-Key header
+ */
+export function extractApiKey(req: Request): string | null {
+  const apiKey = req.headers['x-api-key'];
+  if (apiKey && typeof apiKey === 'string') {
+    return apiKey;
   }
-
-  const payload = oauthManager.verifyJWT(token);
-  if (!payload) {
-    res.status(401).json({
-      error: 'Unauthorized',
-      message: 'Invalid or expired token',
-    });
-    return;
-  }
-
-  const tandaClient = oauthManager.getTandaClient(payload.sessionId);
-  if (!tandaClient) {
-    res.status(401).json({
-      error: 'Unauthorized',
-      message: 'Session expired or invalid',
-    });
-    return;
-  }
-
-  req.auth = {
-    payload,
-    sessionId: payload.sessionId,
-    tandaClient,
-  };
-
-  next();
+  return null;
 }
 
-// Middleware that optionally extracts auth (doesn't fail if not present)
-export function optionalAuth(req: Request, res: Response, next: NextFunction): void {
-  const token = extractBearerToken(req);
+/**
+ * Extract auth credentials from request (supports both JWT and API key)
+ */
+export function extractAuthCredentials(req: Request): {
+  type: AuthType;
+  credential: string | null;
+} {
+  // Check for Bearer token first
+  const bearerToken = extractBearerToken(req);
+  if (bearerToken) {
+    return { type: 'jwt', credential: bearerToken };
+  }
 
-  if (token) {
-    const payload = oauthManager.verifyJWT(token);
+  // Check for API key
+  const apiKey = extractApiKey(req);
+  if (apiKey) {
+    return { type: 'apikey', credential: apiKey };
+  }
+
+  return { type: 'none', credential: null };
+}
+
+// Middleware that requires authentication (supports JWT and API key)
+export function requireAuth(req: Request, res: Response, next: NextFunction): void {
+  const { type, credential } = extractAuthCredentials(req);
+
+  // Try JWT authentication first
+  if (type === 'jwt' && credential) {
+    const payload = oauthManager.verifyJWT(credential);
     if (payload) {
       const tandaClient = oauthManager.getTandaClient(payload.sessionId);
       if (tandaClient) {
@@ -80,8 +80,90 @@ export function optionalAuth(req: Request, res: Response, next: NextFunction): v
           payload,
           sessionId: payload.sessionId,
           tandaClient,
+          authType: 'jwt',
+        };
+        next();
+        return;
+      }
+    }
+    // JWT provided but invalid
+    res.status(401).json({
+      error: 'Unauthorized',
+      message: 'Invalid or expired token',
+    });
+    return;
+  }
+
+  // Try API key authentication
+  if (type === 'apikey' && credential) {
+    const tandaClient = apiKeyManager.validateApiKey(credential);
+    if (tandaClient) {
+      // Create a pseudo-payload for API key auth
+      const pseudoPayload: JWTPayload = {
+        sessionId: 'service-account',
+        userId: 0,
+        email: 'service-account@workforce.mcp',
+      };
+      req.auth = {
+        payload: pseudoPayload,
+        sessionId: 'service-account',
+        tandaClient,
+        authType: 'apikey',
+      };
+      logger.debug('Authenticated via service API key');
+      next();
+      return;
+    }
+    // API key provided but invalid
+    res.status(401).json({
+      error: 'Unauthorized',
+      message: 'Invalid API key',
+    });
+    return;
+  }
+
+  // No authentication provided
+  res.status(401).json({
+    error: 'Unauthorized',
+    message: 'No authentication provided. Use Bearer token or X-API-Key header.',
+  });
+}
+
+// Middleware that optionally extracts auth (doesn't fail if not present)
+export function optionalAuth(req: Request, res: Response, next: NextFunction): void {
+  const { type, credential } = extractAuthCredentials(req);
+
+  // Try JWT authentication
+  if (type === 'jwt' && credential) {
+    const payload = oauthManager.verifyJWT(credential);
+    if (payload) {
+      const tandaClient = oauthManager.getTandaClient(payload.sessionId);
+      if (tandaClient) {
+        req.auth = {
+          payload,
+          sessionId: payload.sessionId,
+          tandaClient,
+          authType: 'jwt',
         };
       }
+    }
+  }
+
+  // Try API key authentication
+  if (type === 'apikey' && credential) {
+    const tandaClient = apiKeyManager.validateApiKey(credential);
+    if (tandaClient) {
+      const pseudoPayload: JWTPayload = {
+        sessionId: 'service-account',
+        userId: 0,
+        email: 'service-account@workforce.mcp',
+      };
+      req.auth = {
+        payload: pseudoPayload,
+        sessionId: 'service-account',
+        tandaClient,
+        authType: 'apikey',
+      };
     }
   }
 

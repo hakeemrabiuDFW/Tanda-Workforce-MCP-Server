@@ -105,6 +105,12 @@ const environmentSchema = z.object({
 
   // v3.0: Read-only mode - when enabled, only GET operations are allowed
   MCP_READ_ONLY_MODE: z.string().optional().transform((val) => val === 'true'),
+
+  // v3.2: Service Account API Key Authentication (alternative to OAuth)
+  // Allows team members to use a shared API key instead of individual OAuth
+  TANDA_SERVICE_API_KEY: z.string().optional(),
+  TANDA_SERVICE_ACCESS_TOKEN: z.string().optional(),
+  TANDA_SERVICE_REFRESH_TOKEN: z.string().optional(),
 });
 
 function loadEnvironment() {
@@ -159,8 +165,11 @@ function loadEnvironment() {
       RATE_LIMIT_WINDOW_MS: 900000,
       RATE_LIMIT_MAX_REQUESTS: 100,
       MCP_SERVER_NAME: 'tanda-workforce-mcp',
-      MCP_SERVER_VERSION: '3.0.0',
+      MCP_SERVER_VERSION: '3.2.0',
       MCP_READ_ONLY_MODE: process.env.MCP_READ_ONLY_MODE === 'true',
+      TANDA_SERVICE_API_KEY: process.env.TANDA_SERVICE_API_KEY,
+      TANDA_SERVICE_ACCESS_TOKEN: process.env.TANDA_SERVICE_ACCESS_TOKEN,
+      TANDA_SERVICE_REFRESH_TOKEN: process.env.TANDA_SERVICE_REFRESH_TOKEN,
     };
   }
 

@@ -7,6 +7,7 @@ import { config } from '../config/environment';
 import { logger } from '../utils/logger';
 import { oauthManager } from '../auth/oauth';
 import { requireAuth, optionalAuth, errorHandler, extractBearerToken } from '../auth/middleware';
+import { apiKeyManager } from '../auth/apikey';
 import { createMCPRouter } from '../mcp/handler';
 import { exchangeCodeForToken, TandaClient } from '../tanda/client';
 
@@ -35,7 +36,7 @@ export function createApp(): Application {
       : config.CORS_ORIGINS.split(',').map((o) => o.trim()),
     credentials: true,
     methods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS'],
-    allowedHeaders: ['Content-Type', 'Authorization', 'X-Session-ID'],
+    allowedHeaders: ['Content-Type', 'Authorization', 'X-Session-ID', 'X-API-Key'],
   };
   app.use(cors(corsOptions));
 
@@ -81,7 +82,14 @@ export function createApp(): Application {
     res.json({
       name: config.MCP_SERVER_NAME,
       version: config.MCP_SERVER_VERSION,
-      description: 'Tanda Workforce MCP Server with OAuth2 authentication',
+      description: 'Tanda Workforce MCP Server with OAuth2 and API Key authentication',
+      authentication: {
+        oauth: 'Use Authorization: Bearer <jwt_token> header',
+        apiKey: apiKeyManager.isServiceAccountConfigured()
+          ? 'Use X-API-Key header (service account enabled)'
+          : 'API key auth not configured',
+      },
+      readOnlyMode: config.MCP_READ_ONLY_MODE,
       endpoints: {
         health: '/health',
         oauth: {
@@ -639,23 +647,29 @@ export function createApp(): Application {
       title: 'Tanda Workforce MCP Server API',
       version: config.MCP_SERVER_VERSION,
       authentication: {
-        description: 'This server uses OAuth2 for authentication with Tanda',
-        flows: {
-          browserFlow: {
-            step1: 'Navigate to /auth/login to start OAuth flow',
-            step2: 'User authenticates with Tanda',
-            step3: 'Callback returns JWT token',
-            step4: 'Use JWT in Authorization header for subsequent requests',
-          },
-          apiFlow: {
-            step1: 'Redirect user to Tanda OAuth URL with your client_id',
-            step2: 'User authenticates and is redirected back with code',
-            step3: 'POST code to /api/authenticate',
-            step4: 'Use returned JWT in Authorization header',
-          },
+        description: 'This server supports OAuth2 and API Key authentication',
+        apiKeyAuth: {
+          enabled: apiKeyManager.isServiceAccountConfigured(),
+          description: 'Use X-API-Key header with pre-configured service account key',
+          header: 'X-API-Key: <your-api-key>',
+          useCase: 'Recommended for team access without individual OAuth',
         },
-        headers: {
-          Authorization: 'Bearer <jwt_token>',
+        oauth2: {
+          flows: {
+            browserFlow: {
+              step1: 'Navigate to /auth/login to start OAuth flow',
+              step2: 'User authenticates with Tanda',
+              step3: 'Callback returns JWT token',
+              step4: 'Use JWT in Authorization header for subsequent requests',
+            },
+            apiFlow: {
+              step1: 'Redirect user to Tanda OAuth URL with your client_id',
+              step2: 'User authenticates and is redirected back with code',
+              step3: 'POST code to /api/authenticate',
+              step4: 'Use returned JWT in Authorization header',
+            },
+          },
+          header: 'Authorization: Bearer <jwt_token>',
         },
       },
       endpoints: {
