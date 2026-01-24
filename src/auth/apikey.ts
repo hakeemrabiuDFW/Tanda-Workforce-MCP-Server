@@ -77,6 +77,17 @@ class ApiKeyManager {
   }
 
   /**
+   * Get the service account TandaClient directly (for unauthenticated MCP access)
+   * This allows Claude.ai to use the connector without sending headers
+   */
+  getServiceAccountClient(): TandaClient | null {
+    if (!this.isServiceAccountConfigured()) {
+      return null;
+    }
+    return this.serviceTandaClient;
+  }
+
+  /**
    * Get auth type description for logging
    */
   getAuthType(): string {

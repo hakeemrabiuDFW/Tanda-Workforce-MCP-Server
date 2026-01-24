@@ -113,20 +113,42 @@ export function createApp(): Application {
   });
 
   // POST / - Handle MCP requests at root (Claude sends here after SSE connection)
-  // Authentication required except for 'initialize' (protocol handshake)
+  // Allows unauthenticated access when service account is configured (for Claude.ai)
   app.post('/', optionalAuth, (req: Request, res: Response, next: NextFunction) => {
     const method = req.body?.method;
 
     // Allow 'initialize' without auth for protocol handshake
-    // All other methods require authentication to trigger OAuth flow
-    if (method !== 'initialize' && !req.auth?.tandaClient) {
-      const baseUrl = `${req.protocol}://${req.get('host')}`;
-      res.setHeader('WWW-Authenticate', `Bearer resource_metadata="${baseUrl}/.well-known/oauth-protected-resource"`);
-      res.status(401).json({
-        error: 'unauthorized',
-        error_description: 'Authentication required. Please complete OAuth flow.',
-      });
+    if (method === 'initialize') {
+      next();
       return;
+    }
+
+    // If not authenticated, try to use service account
+    if (!req.auth?.tandaClient) {
+      const serviceClient = apiKeyManager.getServiceAccountClient();
+      if (serviceClient) {
+        // Inject service account into request for MCP handlers
+        req.auth = {
+          payload: {
+            sessionId: 'service-account',
+            userId: 0,
+            email: 'service-account@workforce.mcp',
+          },
+          sessionId: 'service-account',
+          tandaClient: serviceClient,
+          authType: 'apikey',
+        };
+        logger.info(`Using service account for unauthenticated root MCP request: ${method}`);
+      } else {
+        // No service account configured, require OAuth
+        const baseUrl = `${req.protocol}://${req.get('host')}`;
+        res.setHeader('WWW-Authenticate', `Bearer resource_metadata="${baseUrl}/.well-known/oauth-protected-resource"`);
+        res.status(401).json({
+          error: 'unauthorized',
+          error_description: 'Authentication required. Please complete OAuth flow.',
+        });
+        return;
+      }
     }
 
     next();
@@ -502,18 +524,26 @@ export function createApp(): Application {
   // ==================== MCP Endpoint ====================
 
   // GET /mcp - SSE endpoint for server-to-client messages (required for remote MCP)
-  // This endpoint REQUIRES authentication to trigger OAuth flow in Claude.ai
+  // Allows unauthenticated access when service account is configured (for Claude.ai)
   app.get('/mcp', optionalAuth, (req: Request, res: Response) => {
-    // Check if user is authenticated - if not, return 401 to trigger OAuth flow
+    // Check if user is authenticated
+    // If not authenticated but service account is configured, allow access
+    // This enables Claude.ai to use the connector without sending headers
     if (!req.auth?.tandaClient) {
-      const baseUrl = `${req.protocol}://${req.get('host')}`;
-      // Include resource_metadata per RFC 9728 to help Claude.ai discover OAuth
-      res.setHeader('WWW-Authenticate', `Bearer resource_metadata="${baseUrl}/.well-known/oauth-protected-resource"`);
-      res.status(401).json({
-        error: 'unauthorized',
-        error_description: 'Authentication required. Please complete OAuth flow.',
-      });
-      return;
+      const serviceClient = apiKeyManager.getServiceAccountClient();
+      if (serviceClient) {
+        // Use service account for this request
+        logger.info('Using service account for unauthenticated MCP SSE connection');
+      } else {
+        // No service account configured, require OAuth
+        const baseUrl = `${req.protocol}://${req.get('host')}`;
+        res.setHeader('WWW-Authenticate', `Bearer resource_metadata="${baseUrl}/.well-known/oauth-protected-resource"`);
+        res.status(401).json({
+          error: 'unauthorized',
+          error_description: 'Authentication required. Please complete OAuth flow.',
+        });
+        return;
+      }
     }
 
     // Set comprehensive SSE headers for proxy compatibility
@@ -593,20 +623,42 @@ export function createApp(): Application {
   });
 
   // POST /mcp - MCP protocol endpoint
-  // Authentication required except for 'initialize' (protocol handshake)
+  // Allows unauthenticated access when service account is configured (for Claude.ai)
   app.post('/mcp', optionalAuth, (req: Request, res: Response, next: NextFunction) => {
     const method = req.body?.method;
 
     // Allow 'initialize' without auth for protocol handshake
-    // All other methods require authentication to trigger OAuth flow
-    if (method !== 'initialize' && !req.auth?.tandaClient) {
-      const baseUrl = `${req.protocol}://${req.get('host')}`;
-      res.setHeader('WWW-Authenticate', `Bearer resource_metadata="${baseUrl}/.well-known/oauth-protected-resource"`);
-      res.status(401).json({
-        error: 'unauthorized',
-        error_description: 'Authentication required. Please complete OAuth flow.',
-      });
+    if (method === 'initialize') {
+      next();
       return;
+    }
+
+    // If not authenticated, try to use service account
+    if (!req.auth?.tandaClient) {
+      const serviceClient = apiKeyManager.getServiceAccountClient();
+      if (serviceClient) {
+        // Inject service account into request for MCP handlers
+        req.auth = {
+          payload: {
+            sessionId: 'service-account',
+            userId: 0,
+            email: 'service-account@workforce.mcp',
+          },
+          sessionId: 'service-account',
+          tandaClient: serviceClient,
+          authType: 'apikey',
+        };
+        logger.info(`Using service account for unauthenticated MCP request: ${method}`);
+      } else {
+        // No service account configured, require OAuth
+        const baseUrl = `${req.protocol}://${req.get('host')}`;
+        res.setHeader('WWW-Authenticate', `Bearer resource_metadata="${baseUrl}/.well-known/oauth-protected-resource"`);
+        res.status(401).json({
+          error: 'unauthorized',
+          error_description: 'Authentication required. Please complete OAuth flow.',
+        });
+        return;
+      }
     }
 
     next();
