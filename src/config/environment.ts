@@ -101,10 +101,13 @@ const environmentSchema = z.object({
 
   // MCP Configuration
   MCP_SERVER_NAME: z.string().default('tanda-workforce-mcp'),
-  MCP_SERVER_VERSION: z.string().default('3.0.0'),
+  MCP_SERVER_VERSION: z.string().default('4.0.0'),
 
   // v3.0: Read-only mode - when enabled, only GET operations are allowed
   MCP_READ_ONLY_MODE: z.string().optional().transform((val) => val === 'true'),
+
+  // v4.0: Lite mode - only exposes 6 essential read-only tools for simple use cases
+  MCP_LITE_MODE: z.string().optional().transform((val) => val === 'true'),
 });
 
 function loadEnvironment() {
@@ -159,8 +162,9 @@ function loadEnvironment() {
       RATE_LIMIT_WINDOW_MS: 900000,
       RATE_LIMIT_MAX_REQUESTS: 100,
       MCP_SERVER_NAME: 'tanda-workforce-mcp',
-      MCP_SERVER_VERSION: '3.0.0',
+      MCP_SERVER_VERSION: '4.0.0',
       MCP_READ_ONLY_MODE: process.env.MCP_READ_ONLY_MODE === 'true',
+      MCP_LITE_MODE: process.env.MCP_LITE_MODE === 'true',
     };
   }
 

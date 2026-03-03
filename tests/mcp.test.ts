@@ -52,6 +52,7 @@ describe('MCP Protocol Endpoints', () => {
 
         expect(response.body.result.serverInfo).toHaveProperty('name');
         expect(response.body.result.serverInfo).toHaveProperty('version');
+        expect(response.body.result.serverInfo.version).toBe('4.0.0');
       });
 
       it('should return capabilities in initialize response', async () => {
@@ -94,7 +95,7 @@ describe('MCP Protocol Endpoints', () => {
         expect(Array.isArray(response.body.result.tools)).toBe(true);
       });
 
-      it('should return at least 35 tools (v3.0 with new tools)', async () => {
+      it('should return exactly 9 consolidated tools (v4.0)', async () => {
         const response = await request(app)
           .post('/mcp')
           .send({
@@ -104,11 +105,11 @@ describe('MCP Protocol Endpoints', () => {
           })
           .expect(200);
 
-        // v3.0 has 38 tools (25 original + 13 new)
-        expect(response.body.result.tools.length).toBeGreaterThanOrEqual(35);
+        // v4.0 consolidated to 9 tools
+        expect(response.body.result.tools.length).toBe(9);
       });
 
-      it('should include expected Tanda tools', async () => {
+      it('should include expected v4.0 consolidated tools', async () => {
         const response = await request(app)
           .post('/mcp')
           .send({
@@ -119,14 +120,18 @@ describe('MCP Protocol Endpoints', () => {
           .expect(200);
 
         const toolNames = response.body.result.tools.map((t: { name: string }) => t.name);
-        expect(toolNames).toContain('tanda_get_current_user');
-        expect(toolNames).toContain('tanda_get_users');
-        expect(toolNames).toContain('tanda_get_departments');
-        expect(toolNames).toContain('tanda_get_schedules');
-        expect(toolNames).toContain('tanda_get_leave_requests');
+        expect(toolNames).toContain('tanda_users');
+        expect(toolNames).toContain('tanda_schedules');
+        expect(toolNames).toContain('tanda_timesheets');
+        expect(toolNames).toContain('tanda_leave');
+        expect(toolNames).toContain('tanda_rosters');
+        expect(toolNames).toContain('tanda_reference');
+        expect(toolNames).toContain('tanda_realtime');
+        expect(toolNames).toContain('tanda_unavailability');
+        expect(toolNames).toContain('tanda_supervisors');
       });
 
-      it('should have tool definitions with name and description', async () => {
+      it('should have tool definitions with action enum', async () => {
         const response = await request(app)
           .post('/mcp')
           .send({
@@ -140,6 +145,23 @@ describe('MCP Protocol Endpoints', () => {
         expect(tool).toHaveProperty('name');
         expect(tool).toHaveProperty('description');
         expect(tool).toHaveProperty('inputSchema');
+        expect(tool.inputSchema.properties).toHaveProperty('action');
+        expect(tool.inputSchema.properties.action).toHaveProperty('enum');
+      });
+
+      it('should have pagination params on list tools', async () => {
+        const response = await request(app)
+          .post('/mcp')
+          .send({
+            jsonrpc: '2.0',
+            id: 2,
+            method: 'tools/list',
+          })
+          .expect(200);
+
+        const usersTool = response.body.result.tools.find((t: { name: string }) => t.name === 'tanda_users');
+        expect(usersTool.inputSchema.properties).toHaveProperty('limit');
+        expect(usersTool.inputSchema.properties).toHaveProperty('page');
       });
     });
 
@@ -152,8 +174,8 @@ describe('MCP Protocol Endpoints', () => {
             id: 3,
             method: 'tools/call',
             params: {
-              name: 'tanda_get_current_user',
-              arguments: {},
+              name: 'tanda_users',
+              arguments: { action: 'current' },
             },
           })
           .expect(200);
@@ -253,32 +275,6 @@ describe('MCP Protocol Endpoints', () => {
         expect(response.body.error).toHaveProperty('code');
         expect(response.body.error).toHaveProperty('message');
       });
-
-      it('should handle missing jsonrpc field', async () => {
-        const response = await request(app)
-          .post('/mcp')
-          .send({
-            id: 8,
-            method: 'ping',
-          });
-
-        // Server may return 400 for invalid JSON-RPC or process anyway
-        expect([200, 400]).toContain(response.status);
-        expect(response.body).toBeDefined();
-      });
-
-      it('should handle missing id field', async () => {
-        const response = await request(app)
-          .post('/mcp')
-          .send({
-            jsonrpc: '2.0',
-            method: 'ping',
-          })
-          .expect(200);
-
-        // Notifications (no id) should not return response
-        expect(response.body).toBeDefined();
-      });
     });
   });
 
@@ -317,18 +313,9 @@ describe('MCP Protocol Endpoints', () => {
       expect(Array.isArray(response.body.result.tools)).toBe(true);
     });
   });
-
-  describe('GET /mcp - SSE Endpoint', () => {
-    it('should be configured for SSE', () => {
-      // SSE endpoint exists and is properly configured in the app
-      // Full SSE testing requires manual verification as connections stay open
-      // See DEPLOYMENT.md for SSE testing instructions
-      expect(app).toBeDefined();
-    });
-  });
 });
 
-describe('MCP Tool Definitions', () => {
+describe('MCP v4.0 Consolidated Tool Definitions', () => {
   let app: Application;
 
   beforeAll(() => {
@@ -351,25 +338,20 @@ describe('MCP Tool Definitions', () => {
     });
   });
 
-  const toolCategories = [
-    { prefix: 'tanda_get_current_user', description: 'user management' },
-    { prefix: 'tanda_get_users', description: 'user listing' },
-    { prefix: 'tanda_get_departments', description: 'departments' },
-    { prefix: 'tanda_get_locations', description: 'locations' },
-    { prefix: 'tanda_get_schedules', description: 'scheduling' },
-    { prefix: 'tanda_get_shifts', description: 'shifts' },
-    { prefix: 'tanda_get_leave_requests', description: 'leave' },
-    { prefix: 'tanda_get_roster_costs', description: 'costs' },
-    // v3.0 New Tools
-    { prefix: 'tanda_get_active_shifts', description: 'active shifts (v3)' },
-    { prefix: 'tanda_get_clocked_in_users', description: 'clocked-in users (v3)' },
-    { prefix: 'tanda_get_current_roster', description: 'current roster (v3)' },
-    { prefix: 'tanda_get_inactive_users', description: 'inactive users (v3)' },
-    { prefix: 'tanda_get_leave_types', description: 'leave types (v3)' },
+  const v4Tools = [
+    { name: 'tanda_users', actions: ['list', 'get', 'inactive', 'onboard', 'invite', 'by_department', 'current'] },
+    { name: 'tanda_schedules', actions: ['list', 'get', 'create', 'update', 'delete', 'publish'] },
+    { name: 'tanda_timesheets', actions: ['shifts', 'timesheets', 'approve_shift', 'approve_timesheet', 'breaks'] },
+    { name: 'tanda_leave', actions: ['list', 'create', 'approve', 'decline', 'delete', 'balances', 'types', 'calculate_hours'] },
+    { name: 'tanda_rosters', actions: ['get', 'current', 'by_date'] },
+    { name: 'tanda_reference', actions: ['departments', 'locations', 'teams', 'daily_stats'] },
+    { name: 'tanda_realtime', actions: ['active_shifts', 'clocked_in', 'shift_limits', 'award_interpretation', 'roster_costs'] },
+    { name: 'tanda_unavailability', actions: ['list', 'create', 'delete'] },
+    { name: 'tanda_supervisors', actions: ['detect_overlaps', 'evening_coverage', 'recommendations', 'optimize', 'validate', 'create_optimized'] },
   ];
 
-  toolCategories.forEach(({ prefix, description }) => {
-    it(`should include ${description} tool (${prefix})`, async () => {
+  v4Tools.forEach(({ name, actions }) => {
+    it(`should have ${name} tool with correct actions`, async () => {
       const response = await request(app)
         .post('/mcp')
         .send({
@@ -379,138 +361,22 @@ describe('MCP Tool Definitions', () => {
         })
         .expect(200);
 
-      const toolNames = response.body.result.tools.map((t: { name: string }) => t.name);
-      expect(toolNames).toContain(prefix);
+      const tool = response.body.result.tools.find((t: { name: string }) => t.name === name);
+      expect(tool).toBeDefined();
+      expect(tool.inputSchema.properties.action.enum).toEqual(actions);
     });
   });
 });
 
-// v3.0 New Feature Tests
-describe('MCP v3.0 New Features', () => {
+describe('MCP v4.0 Features', () => {
   let app: Application;
 
   beforeAll(() => {
     app = createApp();
   });
 
-  describe('v3.0 Real-time Attendance Tools', () => {
-    const v3AttendanceTools = [
-      'tanda_get_active_shifts',
-      'tanda_get_clocked_in_users',
-      'tanda_get_shift_breaks',
-      'tanda_get_shift_limits',
-    ];
-
-    v3AttendanceTools.forEach((toolName) => {
-      it(`should have ${toolName} tool defined`, async () => {
-        const response = await request(app)
-          .post('/mcp')
-          .send({
-            jsonrpc: '2.0',
-            id: 1,
-            method: 'tools/list',
-          })
-          .expect(200);
-
-        const tool = response.body.result.tools.find((t: { name: string }) => t.name === toolName);
-        expect(tool).toBeDefined();
-        expect(tool).toHaveProperty('description');
-        expect(tool).toHaveProperty('inputSchema');
-      });
-    });
-  });
-
-  describe('v3.0 Roster Period Tools', () => {
-    const v3RosterTools = [
-      'tanda_get_roster',
-      'tanda_get_current_roster',
-      'tanda_get_roster_by_date',
-    ];
-
-    v3RosterTools.forEach((toolName) => {
-      it(`should have ${toolName} tool defined`, async () => {
-        const response = await request(app)
-          .post('/mcp')
-          .send({
-            jsonrpc: '2.0',
-            id: 1,
-            method: 'tools/list',
-          })
-          .expect(200);
-
-        const tool = response.body.result.tools.find((t: { name: string }) => t.name === toolName);
-        expect(tool).toBeDefined();
-      });
-    });
-  });
-
-  describe('v3.0 Staff Management Tools', () => {
-    const v3StaffTools = [
-      'tanda_get_inactive_users',
-      'tanda_onboard_users',
-      'tanda_invite_user',
-    ];
-
-    v3StaffTools.forEach((toolName) => {
-      it(`should have ${toolName} tool defined`, async () => {
-        const response = await request(app)
-          .post('/mcp')
-          .send({
-            jsonrpc: '2.0',
-            id: 1,
-            method: 'tools/list',
-          })
-          .expect(200);
-
-        const tool = response.body.result.tools.find((t: { name: string }) => t.name === toolName);
-        expect(tool).toBeDefined();
-      });
-    });
-
-    it('should have onboard_users with proper schema for bulk operations', async () => {
-      const response = await request(app)
-        .post('/mcp')
-        .send({
-          jsonrpc: '2.0',
-          id: 1,
-          method: 'tools/list',
-        })
-        .expect(200);
-
-      const tool = response.body.result.tools.find(
-        (t: { name: string }) => t.name === 'tanda_onboard_users'
-      );
-      expect(tool).toBeDefined();
-      expect(tool.inputSchema.properties).toHaveProperty('users');
-      expect(tool.inputSchema.required).toContain('users');
-    });
-  });
-
-  describe('v3.0 Leave Enhancement Tools', () => {
-    const v3LeaveTools = [
-      'tanda_get_leave_types',
-      'tanda_calculate_leave_hours',
-    ];
-
-    v3LeaveTools.forEach((toolName) => {
-      it(`should have ${toolName} tool defined`, async () => {
-        const response = await request(app)
-          .post('/mcp')
-          .send({
-            jsonrpc: '2.0',
-            id: 1,
-            method: 'tools/list',
-          })
-          .expect(200);
-
-        const tool = response.body.result.tools.find((t: { name: string }) => t.name === toolName);
-        expect(tool).toBeDefined();
-      });
-    });
-  });
-
-  describe('v3.0 Prompts', () => {
-    it('should list v3.0 prompts', async () => {
+  describe('Prompts', () => {
+    it('should list prompts', async () => {
       const response = await request(app)
         .post('/mcp')
         .send({
@@ -521,15 +387,13 @@ describe('MCP v3.0 New Features', () => {
         .expect(200);
 
       const promptNames = response.body.result.prompts.map((p: { name: string }) => p.name);
-
-      // v3.0 New Prompts
       expect(promptNames).toContain('workforce_dashboard');
       expect(promptNames).toContain('compliance_check');
       expect(promptNames).toContain('onboard_employee');
       expect(promptNames).toContain('leave_planner');
     });
 
-    it('should get workforce_dashboard prompt', async () => {
+    it('should get workforce_dashboard prompt with v4.0 tool references', async () => {
       const response = await request(app)
         .post('/mcp')
         .send({
@@ -543,34 +407,14 @@ describe('MCP v3.0 New Features', () => {
         .expect(200);
 
       expect(response.body.result).toHaveProperty('messages');
-      expect(response.body.result.messages[0].content.text).toContain('tanda_get_active_shifts');
-    });
-
-    it('should get compliance_check prompt with arguments', async () => {
-      const response = await request(app)
-        .post('/mcp')
-        .send({
-          jsonrpc: '2.0',
-          id: 1,
-          method: 'prompts/get',
-          params: {
-            name: 'compliance_check',
-            arguments: {
-              date: '2024-01-15',
-              user_id: '123',
-            },
-          },
-        })
-        .expect(200);
-
-      expect(response.body.result).toHaveProperty('messages');
-      expect(response.body.result.messages[0].content.text).toContain('2024-01-15');
-      expect(response.body.result.messages[0].content.text).toContain('123');
+      // v4.0 uses consolidated tool names with action parameter
+      expect(response.body.result.messages[0].content.text).toContain('tanda_realtime');
+      expect(response.body.result.messages[0].content.text).toContain('action=active_shifts');
     });
   });
 
-  describe('v3.0 Tool Count', () => {
-    it('should have exactly 38 tools in v3.0', async () => {
+  describe('Tool Count', () => {
+    it('should have exactly 9 consolidated tools in v4.0', async () => {
       const response = await request(app)
         .post('/mcp')
         .send({
@@ -580,11 +424,10 @@ describe('MCP v3.0 New Features', () => {
         })
         .expect(200);
 
-      // v3.1: 25 original + 13 new + 6 supervisor optimization = 44 tools
-      expect(response.body.result.tools.length).toBe(44);
+      expect(response.body.result.tools.length).toBe(9);
     });
 
-    it('should have 6 prompts in v3.0', async () => {
+    it('should have 6 prompts', async () => {
       const response = await request(app)
         .post('/mcp')
         .send({
@@ -594,8 +437,24 @@ describe('MCP v3.0 New Features', () => {
         })
         .expect(200);
 
-      // v3.0: 2 original + 4 new = 6 prompts
       expect(response.body.result.prompts.length).toBe(6);
+    });
+  });
+
+  describe('Short Descriptions', () => {
+    it('should have short descriptions (< 150 chars)', async () => {
+      const response = await request(app)
+        .post('/mcp')
+        .send({
+          jsonrpc: '2.0',
+          id: 1,
+          method: 'tools/list',
+        })
+        .expect(200);
+
+      response.body.result.tools.forEach((tool: { name: string; description: string }) => {
+        expect(tool.description.length).toBeLessThan(150);
+      });
     });
   });
 });

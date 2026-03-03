@@ -429,7 +429,7 @@ export class MCPHandler {
           },
         };
 
-      // v3.0 New Prompt Handlers
+      // v4.0 Updated Prompts with consolidated tools
       case 'workforce_dashboard':
         return {
           jsonrpc: '2.0',
@@ -442,13 +442,13 @@ export class MCPHandler {
                 content: {
                   type: 'text',
                   text: `Generate a real-time workforce dashboard showing:
-1. Currently active shifts - who is working right now (use tanda_get_active_shifts)
-2. Clocked-in employees - real-time attendance status (use tanda_get_clocked_in_users)
-3. Current roster period overview (use tanda_get_current_roster)
-4. Any shift limit warnings or compliance alerts (use tanda_get_shift_limits)
-5. Pending leave requests that need attention
+1. Currently active shifts (use tanda_realtime action=active_shifts)
+2. Clocked-in employees (use tanda_realtime action=clocked_in)
+3. Current roster period (use tanda_rosters action=current)
+4. Shift limit warnings (use tanda_realtime action=shift_limits)
+5. Pending leave requests (use tanda_leave action=list status=pending)
 
-Format the dashboard with clear sections and highlight any items requiring immediate attention.`,
+Format with clear sections and highlight items requiring attention.`,
                 },
               },
             ],
@@ -468,10 +468,9 @@ Format the dashboard with clear sections and highlight any items requiring immed
                   type: 'text',
                   text: `Perform a compliance check${promptArgs.date ? ` for ${promptArgs.date}` : ' for today'}${promptArgs.user_id ? ` for user ${promptArgs.user_id}` : ' for all active users'}:
 
-1. Check shift hour limits and overtime warnings (use tanda_get_shift_limits)
-2. Review break compliance for active shifts (use tanda_get_shift_breaks for each shift)
-3. Verify award interpretation requirements are met (use tanda_get_award_interpretation)
-4. Flag any violations or warnings
+1. Check shift hour limits (use tanda_realtime action=shift_limits)
+2. Review break compliance (use tanda_timesheets action=breaks shift_id=X)
+3. Verify award interpretation (use tanda_realtime action=award_interpretation)
 
 Provide a summary with:
 - ✅ Compliant items
@@ -494,18 +493,14 @@ Provide a summary with:
                 role: 'user',
                 content: {
                   type: 'text',
-                  text: `Guide me through onboarding a new employee:
+                  text: `Onboard new employee:
 - Email: ${promptArgs.email || '[employee email]'}
 - Name: ${promptArgs.name || '[employee name]'}
 
 Steps:
-1. First, list available departments (use tanda_get_departments) so I can assign them
-2. Then use tanda_onboard_users to create the user account with:
-   - Email and name as provided
-   - Suggested department assignment
-   - Send invitation email
-3. Confirm the onboarding was successful
-4. Suggest next steps (scheduling their first shift, adding to roster, etc.)`,
+1. List departments (use tanda_reference action=departments)
+2. Create user (use tanda_users action=onboard users=[{email, name, department_ids, send_invite: true}])
+3. Confirm success and suggest next steps`,
                 },
               },
             ],
@@ -523,13 +518,13 @@ Steps:
                 role: 'user',
                 content: {
                   type: 'text',
-                  text: `Help plan leave for user ${promptArgs.user_id || '[user_id]'}:
+                  text: `Plan leave for user ${promptArgs.user_id || '[user_id]'}:
 
-1. Get their current leave balances (use tanda_get_leave_balances)
-2. Show available leave types (use tanda_get_leave_types)
-3. If they want to request specific dates, calculate the hours needed (use tanda_calculate_leave_hours)
-4. Check team coverage for the requested dates (use tanda_get_schedules for that period)
-5. Help create the leave request if there's sufficient balance and coverage`,
+1. Get leave balances (use tanda_leave action=balances user_id=X)
+2. Show available types (use tanda_leave action=types user_id=X)
+3. Calculate hours needed (use tanda_leave action=calculate_hours)
+4. Check team coverage (use tanda_schedules action=list from/to)
+5. Create leave request (use tanda_leave action=create)`,
                 },
               },
             ],
