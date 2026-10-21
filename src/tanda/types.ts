@@ -12,6 +12,9 @@ export interface TandaTokenResponse {
 export interface TandaUser {
   id: number;
   name: string;
+  employee_id?: string;
+  passcode?: string;
+  department_ids?: number[];
   email: string;
   photo?: string;
   phone?: string;
@@ -84,9 +87,10 @@ export interface TandaBreak {
 export interface TandaShift {
   id: number;
   user_id: number;
+  timesheet_id?: number;
   date: string;
-  start: string;
-  finish?: string;
+  start: string | number | null;
+  finish?: string | number | null;
   breaks?: TandaBreak[];
   department_id?: number;
   status?: string;
@@ -98,7 +102,7 @@ export interface TandaShift {
   cost?: number;
   metadata?: Record<string, unknown>;
   // Award interpretation data (when requested with show_award_interpretation=true)
-  award_interpretation?: Record<string, unknown>;
+  award_interpretation?: Record<string, unknown> | Record<string, unknown>[];
 }
 
 export interface TandaAllowance {
@@ -110,7 +114,10 @@ export interface TandaAllowance {
 export interface TandaTimesheet {
   id: number;
   user_id: number;
-  date: string;
+  date?: string;
+  start?: string;
+  finish?: string;
+  total_cost?: number;
   shifts: TandaShift[];
   status: string;
   approved: boolean;
@@ -184,7 +191,7 @@ export interface TandaAwardInterpretation {
   leave_hours?: number;
   overtime?: number;
   allowances?: TandaAllowance[];
-  award_interpretation?: Record<string, unknown>; // Raw data from API
+  award_interpretation?: Record<string, unknown> | Record<string, unknown>[]; // Raw data from API
 }
 
 export interface TandaRosterCost {
@@ -236,6 +243,8 @@ export interface TandaDailyStats {
   overtime_hours?: number;
   break_hours?: number;
   headcount: number;
+  scheduled_shifts?: number;
+  worked_shifts?: number;
 }
 
 export interface TandaPagination {
@@ -307,12 +316,15 @@ export interface ScheduleFilter extends DateRangeFilter {
   department_ids?: number[];
   include_costs?: boolean;
   show_costs?: boolean;
+  include_names?: boolean;
 }
 
 export interface TimesheetFilter extends DateRangeFilter {
   user_ids?: number[];
   approved?: boolean;
   include_costs?: boolean;
+  include_award_interpretation?: boolean;
+  include_empty?: boolean;
 }
 
 // ==================== v3.0 New Types ====================

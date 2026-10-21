@@ -1,4 +1,4 @@
-import axios, { AxiosInstance, AxiosError } from 'axios';
+import axios, { AxiosInstance, AxiosError, AxiosAdapter } from 'axios';
 import { config } from '../config/environment';
 import { logger } from '../utils/logger';
 import {
@@ -39,6 +39,19 @@ import {
   TandaBulkOnboardingResult,
   TandaUserInviteResult,
 } from './types';
+import { tandaRateLimiter } from './rateLimiter';
+import { chunkDateRange, toUnixSeconds, addDays, DEFAULT_TIMEZONE } from '../utils/time';
+import { dedupeById, itemDate, itemHours } from './normalize';
+
+export interface TandaClientOptions {
+  /** Custom axios adapter (used by tests to stub Tanda). */
+  adapter?: AxiosAdapter;
+  /** Skip the shared rate limiter (tests only). */
+  disableRateLimit?: boolean;
+}
+
+/** Tanda rejects date ranges longer than this on list endpoints. */
+export const TANDA_MAX_RANGE_DAYS = 7;
 
 export class TandaApiError extends Error {
   constructor(
@@ -57,7 +70,10 @@ export class TandaClient {
   private refreshToken?: string;
   private tokenExpiresAt?: number;
 
-  constructor(accessToken: string, refreshToken?: string, expiresIn?: number) {
+  private readonly options: TandaClientOptions;
+
+  constructor(accessToken: string, refreshToken?: string, expiresIn?: number, options: TandaClientOptions = {}) {
+    this.options = options;
     this.accessToken = accessToken;
     this.refreshToken = refreshToken;
     if (expiresIn) {
@@ -71,6 +87,7 @@ export class TandaClient {
         'Content-Type': 'application/json',
         'Accept': 'application/json',
       },
+      ...(options.adapter ? { adapter: options.adapter } : {}),
     });
 
     this.setupInterceptors();
@@ -79,7 +96,7 @@ export class TandaClient {
   private setupInterceptors(): void {
     // Request interceptor - add auth token
     this.client.interceptors.request.use(
-      (requestConfig) => {
+      async (requestConfig) => {
         // This server is read-only: never send a mutating request to Tanda.
         const method = (requestConfig.method || 'get').toLowerCase();
         if (method !== 'get' && method !== 'head') {
@@ -87,6 +104,7 @@ export class TandaClient {
             new TandaApiError(`Read-only server: ${method.toUpperCase()} requests to Tanda are disabled`, 403)
           );
         }
+        if (!this.options.disableRateLimit) await tandaRateLimiter.acquire();
         requestConfig.headers.Authorization = `Bearer ${this.accessToken}`;
         logger.debug(`Tanda API Request: ${requestConfig.method?.toUpperCase()} ${requestConfig.url}`);
         return requestConfig;
@@ -165,6 +183,25 @@ export class TandaClient {
     };
   }
 
+  /**
+   * GET a date-ranged list endpoint, splitting from..to into <= 7-day windows so Tanda's
+   * range limit is never hit. Results are merged and de-duplicated by id.
+   */
+  private async getChunked<T extends { id?: unknown }>(
+    path: string,
+    from: string,
+    to: string,
+    extra: Record<string, string> = {}
+  ): Promise<T[]> {
+    const all: T[] = [];
+    for (const chunk of chunkDateRange(from, to, TANDA_MAX_RANGE_DAYS)) {
+      const params = new URLSearchParams({ from: chunk.from, to: chunk.to, ...extra });
+      const response = await this.client.get<T[]>(path, { params });
+      if (Array.isArray(response.data)) all.push(...response.data);
+    }
+    return dedupeById(all);
+  }
+
   // ==================== Users ====================
 
   async getCurrentUser(): Promise<TandaUser> {
@@ -178,7 +215,13 @@ export class TandaClient {
     if (filter?.department_ids?.length) params.append('department_ids', filter.department_ids.join(','));
 
     const response = await this.client.get<TandaUser[]>('/users', { params });
-    return response.data;
+    const users = Array.isArray(response.data) ? response.data : [];
+    // Tanda may ignore department_ids; enforce it client-side
+    if (filter?.department_ids?.length) {
+      const wanted = new Set(filter.department_ids);
+      return users.filter((u) => (u.department_ids || []).some((id) => wanted.has(id)));
+    }
+    return users;
   }
 
   async getUser(userId: number): Promise<TandaUser> {
@@ -218,16 +261,12 @@ export class TandaClient {
   // ==================== Schedules (Rosters) ====================
 
   async getSchedules(filter: ScheduleFilter): Promise<TandaSchedule[]> {
-    const params = new URLSearchParams({
-      from: filter.from,
-      to: filter.to,
-    });
-    if (filter.user_ids?.length) params.append('user_ids', filter.user_ids.join(','));
-    if (filter.department_ids?.length) params.append('department_ids', filter.department_ids.join(','));
-    if (filter.show_costs) params.append('show_costs', 'true');
-
-    const response = await this.client.get<TandaSchedule[]>('/schedules', { params });
-    return response.data;
+    const extra: Record<string, string> = {};
+    if (filter.user_ids?.length) extra.user_ids = filter.user_ids.join(',');
+    if (filter.department_ids?.length) extra.department_ids = filter.department_ids.join(',');
+    if (filter.show_costs) extra.show_costs = 'true';
+    if (filter.include_names) extra.include_names = 'true';
+    return this.getChunked<TandaSchedule>('/schedules', filter.from, filter.to, extra);
   }
 
   async getSchedule(scheduleId: number): Promise<TandaSchedule> {
@@ -257,15 +296,12 @@ export class TandaClient {
 
   // ==================== Shifts (Timesheets) ====================
 
-  async getShifts(filter: DateRangeFilter & { user_ids?: number[] }): Promise<TandaShift[]> {
-    const params = new URLSearchParams({
-      from: filter.from,
-      to: filter.to,
-    });
-    if (filter.user_ids?.length) params.append('user_ids', filter.user_ids.join(','));
-
-    const response = await this.client.get<TandaShift[]>('/shifts', { params });
-    return response.data;
+  async getShifts(filter: DateRangeFilter & { user_ids?: number[]; show_costs?: boolean; show_award_interpretation?: boolean }): Promise<TandaShift[]> {
+    const extra: Record<string, string> = {};
+    if (filter.user_ids?.length) extra.user_ids = filter.user_ids.join(',');
+    if (filter.show_costs) extra.show_costs = 'true';
+    if (filter.show_award_interpretation) extra.show_award_interpretation = 'true';
+    return this.getChunked<TandaShift>('/shifts', filter.from, filter.to, extra);
   }
 
   async getShift(shiftId: number): Promise<TandaShift> {
@@ -280,53 +316,51 @@ export class TandaClient {
 
   // ==================== Timesheets ====================
 
+  /**
+   * Timesheets overlapping from..to. GET /timesheets/on/{date} returns the whole pay
+   * period containing {date}, so we query once per pay period (jumping past each
+   * period's finish), de-duplicate by timesheet id, and keep only shifts inside the range.
+   * Timesheets with no shifts in range and zero cost are dropped unless include_empty.
+   */
   async getTimesheets(filter: TimesheetFilter): Promise<TandaTimesheet[]> {
-    // Tanda API: /timesheets/on/{date} for specific date, /timesheets/current for current period
-    // We iterate through date range and aggregate results
     const params = new URLSearchParams();
-    if (filter.user_ids?.length) params.append('user_ids', filter.user_ids.join(','));
-    if (filter.approved !== undefined) params.append('approved', String(filter.approved));
-    if (filter.include_costs) params.append('show_costs', 'true');
+    if (filter.include_costs !== false) params.append('show_costs', 'true');
+    if (filter.include_award_interpretation) params.append('show_award_interpretation', 'true');
 
-    try {
-      // Try /timesheets/on/{date} endpoint for each date in range
-      const fromDate = new Date(filter.from);
-      const toDate = new Date(filter.to);
-      const allTimesheets: TandaTimesheet[] = [];
-
-      // Iterate through dates
-      const currentDate = new Date(fromDate);
-      while (currentDate <= toDate) {
-        const dateStr = currentDate.toISOString().split('T')[0];
-        try {
-          const response = await this.client.get<TandaTimesheet[]>(`/timesheets/on/${dateStr}`, { params });
-          if (Array.isArray(response.data)) {
-            allTimesheets.push(...response.data);
-          }
-        } catch {
-          // Skip dates with no data
-        }
-        currentDate.setDate(currentDate.getDate() + 1);
+    const byId = new Map<number, TandaTimesheet>();
+    let date = filter.from;
+    let guard = 0;
+    while (date <= filter.to && guard++ < 62) {
+      const response = await this.client.get<TandaTimesheet[]>(`/timesheets/on/${date}`, { params });
+      const sheets = Array.isArray(response.data) ? response.data : [];
+      let periodEnd: string | null = null;
+      for (const ts of sheets) {
+        if (!byId.has(ts.id)) byId.set(ts.id, ts);
+        const finish = typeof ts.finish === 'string' ? ts.finish.slice(0, 10) : null;
+        if (finish && /^\d{4}-\d{2}-\d{2}$/.test(finish) && (!periodEnd || finish < periodEnd)) periodEnd = finish;
       }
-
-      if (allTimesheets.length > 0) {
-        return allTimesheets;
-      }
-
-      // Fallback: try /timesheets/current
-      const currentResponse = await this.client.get<TandaTimesheet[]>('/timesheets/current', { params });
-      return Array.isArray(currentResponse.data) ? currentResponse.data : [];
-    } catch {
-      // Final fallback to shifts endpoint
-      logger.debug('Timesheets endpoint not available, using shifts');
-      const shiftParams = new URLSearchParams({
-        from: filter.from,
-        to: filter.to,
-      });
-      if (filter.user_ids?.length) shiftParams.append('user_ids', filter.user_ids.join(','));
-      const response = await this.client.get<TandaTimesheet[]>('/shifts', { params: shiftParams });
-      return response.data;
+      // Next query: the day after the earliest period end (pay periods can differ per user)
+      date = periodEnd && periodEnd >= date ? addDays(periodEnd, 1) : addDays(date, 1);
     }
+
+    const userFilter = filter.user_ids?.length ? new Set(filter.user_ids) : null;
+    const result: TandaTimesheet[] = [];
+    for (const ts of byId.values()) {
+      if (userFilter && !userFilter.has(ts.user_id)) continue;
+      if (filter.approved !== undefined) {
+        const approved = ts.status === 'approved' || ts.status === 'exported' || ts.approved === true;
+        if (approved !== filter.approved) continue;
+      }
+      const shifts = dedupeById(Array.isArray(ts.shifts) ? ts.shifts : []).filter((sh) => {
+        const d = itemDate(sh as unknown as Record<string, unknown>);
+        return d !== null && d >= filter.from && d <= filter.to;
+      });
+      const cost = shifts.reduce((sum, sh) => sum + (typeof sh.cost === 'number' ? sh.cost : 0), 0);
+      const totalCost = shifts.length > 0 ? cost : (typeof ts.cost === 'number' ? ts.cost : 0);
+      if (!filter.include_empty && shifts.length === 0 && !totalCost) continue;
+      result.push({ ...ts, shifts, total_cost: Math.round(totalCost * 100) / 100 });
+    }
+    return result;
   }
 
   async getTimesheet(timesheetId: number): Promise<TandaTimesheet> {
@@ -484,87 +518,34 @@ export class TandaClient {
   // ==================== Staff by Department ====================
 
   async getStaffByDepartment(departmentId: number): Promise<TandaUser[]> {
-    // Get users filtered by department
-    const response = await this.client.get<TandaUser[]>('/users', {
-      params: { department_ids: departmentId.toString() },
-    });
-    return response.data;
+    // /users?department_ids is not reliably filtered by Tanda; the department's
+    // `staff` array is the source of truth for membership.
+    const [department, users] = await Promise.all([
+      this.getDepartment(departmentId),
+      this.client.get<TandaUser[]>('/users').then((r) => (Array.isArray(r.data) ? r.data : [])),
+    ]);
+    const staff = new Set(department.staff || []);
+    return users.filter((u) => staff.has(u.id));
   }
 
   // ==================== Daily Stats ====================
 
+  /**
+   * Scheduled vs worked hours per local date. Computed from /schedules and /shifts.
+   * Tanda timestamps are unix SECONDS; hours = (finish - start - breaks) / 3600.
+   */
   async getDailyStats(filter: DateRangeFilter & { department_ids?: number[] }): Promise<TandaDailyStats[]> {
-    const params = new URLSearchParams({
-      from: filter.from,
-      to: filter.to,
-    });
-    if (filter.department_ids?.length) params.append('department_ids', filter.department_ids.join(','));
-
-    try {
-      // Try stats endpoint first
-      const response = await this.client.get<TandaDailyStats[]>('/stats/daily', { params });
-      return response.data;
-    } catch {
-      try {
-        // Alternative: reports endpoint
-        const response = await this.client.get<TandaDailyStats[]>('/reports/daily', { params });
-        return response.data;
-      } catch {
-        // Fall back to computing from schedules and shifts
-        logger.debug('Daily stats endpoint not available, computing from schedules');
-        const [schedules, shifts] = await Promise.all([
-          this.getSchedules({ ...filter }),
-          this.getShifts(filter),
-        ]);
-
-        // Aggregate by date
-        const statsByDate = new Map<string, TandaDailyStats>();
-
-        for (const schedule of schedules) {
-          // Handle both Unix timestamps (number) and ISO strings
-          const startValue = schedule.start;
-          const startDate = typeof startValue === 'number'
-            ? new Date(startValue * 1000)
-            : new Date(startValue);
-          const date = startDate.toISOString().split('T')[0];
-
-          const existing = statsByDate.get(date) || {
-            date,
-            scheduled_hours: 0,
-            actual_hours: 0,
-            headcount: 0,
-          };
-          // Calculate scheduled hours
-          const finishValue = schedule.finish;
-          const finish = typeof finishValue === 'number'
-            ? new Date(finishValue * 1000)
-            : new Date(finishValue);
-          const hours = (finish.getTime() - startDate.getTime()) / (1000 * 60 * 60);
-          existing.scheduled_hours += hours;
-          existing.headcount += 1;
-          statsByDate.set(date, existing);
-        }
-
-        for (const shift of shifts) {
-          const date = shift.date;
-          const existing = statsByDate.get(date) || {
-            date,
-            scheduled_hours: 0,
-            actual_hours: 0,
-            headcount: 0,
-          };
-          if (shift.finish) {
-            const start = new Date(shift.start);
-            const finish = new Date(shift.finish);
-            const hours = (finish.getTime() - start.getTime()) / (1000 * 60 * 60);
-            existing.actual_hours += hours;
-          }
-          statsByDate.set(date, existing);
-        }
-
-        return Array.from(statsByDate.values()).sort((a, b) => a.date.localeCompare(b.date));
-      }
-    }
+    const [schedules, shifts] = await Promise.all([
+      this.getSchedules({ from: filter.from, to: filter.to, department_ids: filter.department_ids }),
+      this.getShifts({ from: filter.from, to: filter.to }),
+    ]);
+    const deptFilter = filter.department_ids?.length ? new Set(filter.department_ids) : null;
+    return computeDailyStats(
+      schedules as unknown as Record<string, unknown>[],
+      (deptFilter ? shifts.filter((s) => s.department_id && deptFilter.has(s.department_id)) : shifts) as unknown as Record<string, unknown>[],
+      filter.from,
+      filter.to
+    );
   }
 
   // ==================== Award Interpretation ====================
@@ -844,6 +825,48 @@ export class TandaClient {
     const response = await this.client.get(`/datastreams/${streamType}`, { params });
     return response.data;
   }
+}
+
+/** Aggregate schedules (scheduled) and shifts (worked) into per-date stats. Exported for tests. */
+export function computeDailyStats(
+  schedules: Record<string, unknown>[],
+  shifts: Record<string, unknown>[],
+  from: string,
+  to: string,
+  timeZone = DEFAULT_TIMEZONE
+): TandaDailyStats[] {
+  const byDate = new Map<string, TandaDailyStats & { _users: Set<unknown> }>();
+  const get = (date: string) => {
+    let row = byDate.get(date);
+    if (!row) {
+      row = { date, scheduled_hours: 0, actual_hours: 0, headcount: 0, scheduled_shifts: 0, worked_shifts: 0, _users: new Set() };
+      byDate.set(date, row);
+    }
+    return row;
+  };
+  for (const sc of schedules) {
+    const date = itemDate(sc, timeZone);
+    if (!date || date < from || date > to) continue;
+    const row = get(date);
+    row.scheduled_hours += itemHours(sc);
+    row.scheduled_shifts = (row.scheduled_shifts || 0) + 1;
+  }
+  for (const sh of shifts) {
+    const date = itemDate(sh, timeZone);
+    if (!date || date < from || date > to) continue;
+    const row = get(date);
+    if (toUnixSeconds(sh.finish) !== null) row.actual_hours += itemHours(sh);
+    row.worked_shifts = (row.worked_shifts || 0) + 1;
+    row._users.add(sh.user_id);
+  }
+  return Array.from(byDate.values())
+    .sort((a, b) => a.date.localeCompare(b.date))
+    .map(({ _users, ...row }) => ({
+      ...row,
+      scheduled_hours: Math.round(row.scheduled_hours * 100) / 100,
+      actual_hours: Math.round(row.actual_hours * 100) / 100,
+      headcount: _users.size,
+    }));
 }
 
 // OAuth Helper Functions

@@ -1,7 +1,8 @@
 import { Request, Response } from 'express';
 import { config } from '../config/environment';
 import { logger } from '../utils/logger';
-import { tandaTools, executeTool, getAvailableTools } from './tools';
+import { tandaTools, executeTool, getAvailableTools, finalizeContent } from './tools';
+import { pickUserFields } from './privacy';
 import { TandaClient } from '../tanda/client';
 
 // MCP Protocol Types
@@ -230,7 +231,7 @@ export class MCPHandler {
 
       switch (params.uri) {
         case 'tanda://user/current':
-          content = await tandaClient.getCurrentUser();
+          content = pickUserFields(await tandaClient.getCurrentUser() as unknown as Record<string, unknown>);
           break;
 
         case 'tanda://organization/info':
@@ -239,12 +240,12 @@ export class MCPHandler {
             tandaClient.getDepartments(),
             tandaClient.getLocations(),
           ]);
-          content = {
-            departments,
-            locations,
+          content = finalizeContent({
             departmentCount: departments.length,
             locationCount: locations.length,
-          };
+            locations: locations.map((l) => ({ id: l.id, name: l.name })),
+            departments: departments.map((d) => ({ id: d.id, name: d.name, location_id: d.location_id })),
+          }, {});
           break;
 
         default:

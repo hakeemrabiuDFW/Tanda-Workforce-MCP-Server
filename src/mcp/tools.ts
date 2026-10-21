@@ -3,6 +3,10 @@ import { logger } from '../utils/logger';
 import { config } from '../config/environment';
 import { SupervisorOptimizer } from '../supervisor/optimizer';
 import { OptimizationRequest } from '../supervisor/types';
+import { guardResponse, byteSize, MAX_BYTES } from './guard';
+import { pickUserFields, parseFields, redactSensitive } from './privacy';
+import { timeFields, itemCost, itemDate } from '../tanda/normalize';
+import { isDate, daysBetween, round2, toZonedISO } from '../utils/time';
 
 // ==================== v4.0 Refactored Tools ====================
 // Consolidated from 44 tools to 9 grouped tools with action parameters
@@ -40,52 +44,101 @@ export interface MCPTool {
 
 // ==================== Pagination & Validation Helpers ====================
 
-interface PaginatedResponse<T> {
-  data: T[];
-  pagination: {
-    page: number;
-    limit: number;
-    total: number;
-    hasMore: boolean;
-  };
+type Args = Record<string, unknown>;
+
+/** Longest from..to range accepted. Ranges are split into 7-day Tanda calls internally. */
+const MAX_RANGE_DAYS = 62;
+
+function paginateResults(rows: unknown[], args: Args, summary: Record<string, unknown> = {}) {
+  return guardResponse({ total: rows.length, ...summary }, rows, {
+    page: args.page,
+    pageSize: args.limit ?? args.page_size,
+    offset: args.offset,
+  });
 }
 
-function paginateResults<T>(data: T[], page: number = 1, limit: number = 50): PaginatedResponse<T> {
-  const safeLimit = Math.min(Math.max(limit, 1), 200);
-  const safePage = Math.max(page, 1);
-  const start = (safePage - 1) * safeLimit;
-  const paginatedData = data.slice(start, start + safeLimit);
-  
-  return {
-    data: paginatedData,
-    pagination: {
-      page: safePage,
-      limit: safeLimit,
-      total: data.length,
-      hasMore: start + safeLimit < data.length,
-    },
-  };
-}
-
-function validateDateRange(from: string, to: string, maxDays: number = 14): { valid: boolean; error?: string } {
-  const fromDate = new Date(from);
-  const toDate = new Date(to);
-  
-  if (isNaN(fromDate.getTime()) || isNaN(toDate.getTime())) {
-    return { valid: false, error: 'Invalid date format. Use YYYY-MM-DD.' };
+function validateDateRange(from: unknown, to: unknown): { valid: boolean; error?: string } {
+  if (!isDate(from) || !isDate(to)) {
+    return { valid: false, error: 'from and to must be dates in YYYY-MM-DD format.' };
   }
-  
-  const daysDiff = (toDate.getTime() - fromDate.getTime()) / (1000 * 60 * 60 * 24);
-  
-  if (daysDiff < 0) {
-    return { valid: false, error: 'End date must be after start date.' };
+  const days = daysBetween(from, to);
+  if (days < 0) return { valid: false, error: '`to` must be on or after `from`.' };
+  if (days >= MAX_RANGE_DAYS) {
+    return { valid: false, error: `Range is ${days + 1} days; the maximum is ${MAX_RANGE_DAYS}. Narrow from/to.` };
   }
-  
-  if (daysDiff > maxDays) {
-    return { valid: false, error: `Max ${maxDays}-day range per query. Split into smaller chunks.` };
-  }
-  
   return { valid: true };
+}
+
+function userRows(users: unknown[], args: Args): Record<string, unknown>[] {
+  const extra = parseFields(args.fields);
+  return users.map((u) => pickUserFields(u as Record<string, unknown>, extra));
+}
+
+function scheduleRow(sc: Record<string, unknown>): Record<string, unknown> {
+  return {
+    id: sc.id,
+    user_id: sc.user_id ?? null,
+    department_id: sc.department_id ?? null,
+    date: itemDate(sc),
+    ...timeFields(sc),
+    ...(sc.cost !== undefined ? { cost: sc.cost } : {}),
+  };
+}
+
+function shiftRow(sh: Record<string, unknown>): Record<string, unknown> {
+  return {
+    id: sh.id,
+    timesheet_id: sh.timesheet_id ?? null,
+    user_id: sh.user_id,
+    department_id: sh.department_id ?? null,
+    date: itemDate(sh),
+    status: sh.status ?? null,
+    ...timeFields(sh),
+    cost: round2(itemCost(sh)),
+  };
+}
+
+function timesheetRow(ts: Record<string, unknown>): Record<string, unknown> {
+  const shifts = (Array.isArray(ts.shifts) ? ts.shifts : []) as Record<string, unknown>[];
+  const rows = shifts.map(shiftRow);
+  return {
+    id: ts.id,
+    user_id: ts.user_id,
+    status: ts.status ?? null,
+    period_start: ts.start ?? null,
+    period_finish: ts.finish ?? null,
+    shift_count: rows.length,
+    hours: round2(rows.reduce((sum, r) => sum + (r.hours as number), 0)),
+    total_cost: ts.total_cost ?? 0,
+    shifts: rows.map(({ id, date, start_iso, finish_iso, hours, cost }) => ({ id, date, start_iso, finish_iso, hours, cost })),
+  };
+}
+
+/**
+ * Final safety net on every tool result: strip sensitive keys (unless requested via
+ * `fields`) and make sure nothing over 25 KB leaves the server.
+ */
+export function finalizeContent(content: unknown, args: Args): unknown {
+  const safe = redactSensitive(content, parseFields(args.fields));
+  if (byteSize(safe) <= MAX_BYTES) return safe;
+
+  if (Array.isArray(safe)) return guardResponse({ total: safe.length }, safe, { offset: args.offset });
+  if (safe && typeof safe === 'object') {
+    const obj = safe as Record<string, unknown>;
+    if (Array.isArray(obj.rows) && obj.summary) {
+      return guardResponse(obj.summary as Record<string, unknown>, obj.rows, { offset: args.offset });
+    }
+    // Guard the largest array property; keep the rest as the summary
+    let key: string | null = null;
+    for (const [k, v] of Object.entries(obj)) {
+      if (Array.isArray(v) && (!key || byteSize(v) > byteSize(obj[key]))) key = k;
+    }
+    if (key) {
+      const { [key]: rows, ...rest } = obj;
+      return guardResponse({ ...rest, rows_from: key }, rows as unknown[], { offset: args.offset });
+    }
+  }
+  return guardResponse({ note: 'Result too large; narrow the date range or filters.' }, []);
 }
 
 // ==================== Consolidated Tool Definitions ====================
@@ -109,6 +162,7 @@ const allTools: MCPTool[] = [
         department_id: { type: 'number', description: 'Department ID (for by_department)' },
         department_ids: { type: 'array', items: { type: 'number' }, description: 'Filter by departments (for list)' },
         active: { type: 'boolean', description: 'Filter by active status (for list)' },
+        fields: { type: 'array', items: { type: 'string' }, description: 'Extra user fields to include (e.g. email). Sensitive fields are omitted by default.' },
         users: {
           type: 'array',
           description: 'Users to onboard (for onboard action)',
@@ -125,8 +179,9 @@ const allTools: MCPTool[] = [
             required: ['email', 'name'],
           },
         },
-        limit: { type: 'number', description: 'Max records (default 50, max 200)' },
+        limit: { type: 'number', description: 'Rows per page (max 50)' },
         page: { type: 'number', description: 'Page number' },
+        offset: { type: 'number', description: 'Row offset (from page.next_offset)' },
       },
       required: ['action'],
     },
@@ -135,7 +190,7 @@ const allTools: MCPTool[] = [
   // 2. SCHEDULES
   {
     name: 'tanda_schedules',
-    description: 'Manage schedules. Actions: list|get|create|update|delete|publish. Max 14-day range.',
+    description: 'Manage schedules. Actions: list|get|create|update|delete|publish. Max 62-day range.',
     inputSchema: {
       type: 'object',
       properties: {
@@ -155,8 +210,9 @@ const allTools: MCPTool[] = [
         finish: { type: 'string', description: 'Shift end ISO 8601 (for create, update)' },
         notes: { type: 'string', description: 'Notes (for create, update)' },
         show_costs: { type: 'boolean', description: 'Include costs (for list)' },
-        limit: { type: 'number', description: 'Max records (default 50, max 200)' },
+        limit: { type: 'number', description: 'Rows per page (max 50)' },
         page: { type: 'number', description: 'Page number' },
+        offset: { type: 'number', description: 'Row offset (from page.next_offset)' },
       },
       required: ['action'],
     },
@@ -165,7 +221,7 @@ const allTools: MCPTool[] = [
   // 3. TIMESHEETS & SHIFTS
   {
     name: 'tanda_timesheets',
-    description: 'Manage timesheets/shifts. Actions: shifts|timesheets|approve_shift|approve_timesheet|breaks. Max 14-day range.',
+    description: 'Manage timesheets/shifts. Actions: shifts|timesheets|approve_shift|approve_timesheet|breaks. Max 62-day range.',
     inputSchema: {
       type: 'object',
       properties: {
@@ -181,8 +237,10 @@ const allTools: MCPTool[] = [
         user_ids: { type: 'array', items: { type: 'number' }, description: 'Filter by users' },
         approved: { type: 'boolean', description: 'Filter by approval status' },
         include_costs: { type: 'boolean', description: 'Include costs' },
-        limit: { type: 'number', description: 'Max records (default 50, max 200)' },
+        include_empty: { type: 'boolean', description: 'Keep timesheets with no shifts and $0 cost (for timesheets)' },
+        limit: { type: 'number', description: 'Rows per page (max 50)' },
         page: { type: 'number', description: 'Page number' },
+        offset: { type: 'number', description: 'Row offset (from page.next_offset)' },
       },
       required: ['action'],
     },
@@ -191,7 +249,7 @@ const allTools: MCPTool[] = [
   // 4. LEAVE MANAGEMENT
   {
     name: 'tanda_leave',
-    description: 'Manage leave. Actions: list|create|approve|decline|delete|balances|types|calculate_hours. Max 14-day range for list.',
+    description: 'Manage leave. Actions: list|create|approve|decline|delete|balances|types|calculate_hours. Max 62-day range for list.',
     inputSchema: {
       type: 'object',
       properties: {
@@ -211,8 +269,9 @@ const allTools: MCPTool[] = [
         hours: { type: 'number', description: 'Partial day hours (for create)' },
         reason: { type: 'string', description: 'Reason (for create, decline)' },
         status: { type: 'string', enum: ['pending', 'approved', 'declined'], description: 'Filter/set status' },
-        limit: { type: 'number', description: 'Max records (default 50, max 200)' },
+        limit: { type: 'number', description: 'Rows per page (max 50)' },
         page: { type: 'number', description: 'Page number' },
+        offset: { type: 'number', description: 'Row offset (from page.next_offset)' },
       },
       required: ['action'],
     },
@@ -241,7 +300,7 @@ const allTools: MCPTool[] = [
   // 6. REFERENCE DATA
   {
     name: 'tanda_reference',
-    description: 'Get reference data. Actions: departments|locations|teams|daily_stats. Max 14-day range for daily_stats.',
+    description: 'Get reference data. Actions: departments|locations|teams|daily_stats. Max 62-day range for daily_stats.',
     inputSchema: {
       type: 'object',
       properties: {
@@ -253,8 +312,9 @@ const allTools: MCPTool[] = [
         from: { type: 'string', description: 'Start date YYYY-MM-DD (for daily_stats)' },
         to: { type: 'string', description: 'End date YYYY-MM-DD (for daily_stats)' },
         department_ids: { type: 'array', items: { type: 'number' }, description: 'Filter by depts (for daily_stats)' },
-        limit: { type: 'number', description: 'Max records (default 50, max 200)' },
+        limit: { type: 'number', description: 'Rows per page (max 50)' },
         page: { type: 'number', description: 'Page number' },
+        offset: { type: 'number', description: 'Row offset (from page.next_offset)' },
       },
       required: ['action'],
     },
@@ -263,7 +323,7 @@ const allTools: MCPTool[] = [
   // 7. REAL-TIME & COSTS
   {
     name: 'tanda_realtime',
-    description: 'Real-time data. Actions: active_shifts|clocked_in|shift_limits|award_interpretation|roster_costs. Max 14-day range where applicable.',
+    description: 'Real-time data. Actions: active_shifts|clocked_in|shift_limits|award_interpretation|roster_costs. Max 62-day range where applicable.',
     inputSchema: {
       type: 'object',
       properties: {
@@ -276,8 +336,9 @@ const allTools: MCPTool[] = [
         to: { type: 'string', description: 'End date YYYY-MM-DD (for award_interpretation, roster_costs)' },
         user_ids: { type: 'array', items: { type: 'number' }, description: 'Filter by users' },
         department_ids: { type: 'array', items: { type: 'number' }, description: 'Filter by depts (for roster_costs)' },
-        limit: { type: 'number', description: 'Max records (default 50, max 200)' },
+        limit: { type: 'number', description: 'Rows per page (max 50)' },
         page: { type: 'number', description: 'Page number' },
+        offset: { type: 'number', description: 'Row offset (from page.next_offset)' },
       },
       required: ['action'],
     },
@@ -286,7 +347,7 @@ const allTools: MCPTool[] = [
   // 8. UNAVAILABILITY
   {
     name: 'tanda_unavailability',
-    description: 'Manage unavailability. Actions: list|create|delete. Max 14-day range for list.',
+    description: 'Manage unavailability. Actions: list|create|delete. Max 62-day range for list.',
     inputSchema: {
       type: 'object',
       properties: {
@@ -304,8 +365,9 @@ const allTools: MCPTool[] = [
         finish: { type: 'string', description: 'End ISO 8601 (for create)' },
         title: { type: 'string', description: 'Title/reason (for create)' },
         repeating: { type: 'boolean', description: 'Repeating (for create)' },
-        limit: { type: 'number', description: 'Max records (default 50, max 200)' },
+        limit: { type: 'number', description: 'Rows per page (max 50)' },
         page: { type: 'number', description: 'Page number' },
+        offset: { type: 'number', description: 'Row offset (from page.next_offset)' },
       },
       required: ['action'],
     },
@@ -314,7 +376,7 @@ const allTools: MCPTool[] = [
   // 9. SUPERVISOR OPTIMIZATION
   {
     name: 'tanda_supervisors',
-    description: 'Supervisor scheduling optimization. Actions: detect_overlaps|evening_coverage|recommendations|optimize|validate|create_optimized. Max 14-day range.',
+    description: 'Supervisor scheduling optimization. Actions: detect_overlaps|evening_coverage|recommendations|optimize|validate|create_optimized. Max 62-day range.',
     inputSchema: {
       type: 'object',
       properties: {
@@ -406,6 +468,32 @@ export async function executeTool(
   }
 
   try {
+    const result = await dispatchTool(client, toolName, action, args);
+    return { ...result, content: finalizeContent(result.content, args) };
+  } catch (error) {
+    logger.error(`Tool execution failed: ${toolName}`, error);
+
+    if (error instanceof TandaApiError) {
+      return {
+        content: { error: error.message, statusCode: error.statusCode },
+        isError: true,
+      };
+    }
+
+    return {
+      content: { error: error instanceof Error ? error.message : 'Unknown error' },
+      isError: true,
+    };
+  }
+}
+
+async function dispatchTool(
+  client: TandaClient,
+  toolName: string,
+  action: string,
+  args: Args
+): Promise<{ content: unknown; isError?: boolean }> {
+  {
     switch (toolName) {
       case 'tanda_users':
         return await executeUsersTool(client, action, args);
@@ -437,20 +525,6 @@ export async function executeTool(
       default:
         return { content: { error: `Unknown tool: ${toolName}` }, isError: true };
     }
-  } catch (error) {
-    logger.error(`Tool execution failed: ${toolName}`, error);
-
-    if (error instanceof TandaApiError) {
-      return {
-        content: { error: error.message, statusCode: error.statusCode },
-        isError: true,
-      };
-    }
-
-    return {
-      content: { error: error instanceof Error ? error.message : 'Unknown error' },
-      isError: true,
-    };
   }
 }
 
@@ -461,34 +535,31 @@ async function executeUsersTool(
   action: string,
   args: Record<string, unknown>
 ): Promise<{ content: unknown; isError?: boolean }> {
-  const page = (args.page as number) || 1;
-  const limit = (args.limit as number) || 50;
-
   switch (action) {
     case 'current':
-      return { content: await client.getCurrentUser() };
+      return { content: userRows([await client.getCurrentUser()], args)[0] };
 
     case 'list': {
       const users = await client.getUsers({
         active: args.active as boolean | undefined,
         department_ids: args.department_ids as number[] | undefined,
       });
-      return { content: paginateResults(users, page, limit) };
+      return { content: paginateResults(userRows(users, args), args) };
     }
 
     case 'get':
       if (!args.user_id) return { content: { error: 'user_id required' }, isError: true };
-      return { content: await client.getUser(args.user_id as number) };
+      return { content: userRows([await client.getUser(args.user_id as number)], args)[0] };
 
     case 'inactive': {
       const users = await client.getInactiveUsers();
-      return { content: paginateResults(users, page, limit) };
+      return { content: paginateResults(userRows(users, args), args) };
     }
 
     case 'by_department':
       if (!args.department_id) return { content: { error: 'department_id required' }, isError: true };
       const staff = await client.getStaffByDepartment(args.department_id as number);
-      return { content: paginateResults(staff, page, limit) };
+      return { content: paginateResults(userRows(staff, args), args, { department_id: args.department_id }) };
 
     case 'onboard':
       if (!args.users) return { content: { error: 'users array required' }, isError: true };
@@ -508,13 +579,10 @@ async function executeSchedulesTool(
   action: string,
   args: Record<string, unknown>
 ): Promise<{ content: unknown; isError?: boolean }> {
-  const page = (args.page as number) || 1;
-  const limit = (args.limit as number) || 50;
-
   switch (action) {
     case 'list': {
       if (!args.from || !args.to) return { content: { error: 'from and to dates required' }, isError: true };
-      const validation = validateDateRange(args.from as string, args.to as string);
+      const validation = validateDateRange(args.from, args.to);
       if (!validation.valid) return { content: { error: validation.error }, isError: true };
 
       const schedules = await client.getSchedules({
@@ -524,7 +592,13 @@ async function executeSchedulesTool(
         department_ids: args.department_ids as number[] | undefined,
         show_costs: args.show_costs as boolean | undefined,
       });
-      return { content: paginateResults(schedules, page, limit) };
+      const rows = (schedules as unknown as Record<string, unknown>[]).map(scheduleRow);
+      return {
+        content: paginateResults(rows, args, {
+          hours: round2(rows.reduce((sum, r) => sum + (r.hours as number), 0)),
+          ...(args.show_costs ? { cost: round2(rows.reduce((sum, r) => sum + ((r.cost as number) || 0), 0)) } : {}),
+        }),
+      };
     }
 
     case 'get':
@@ -562,7 +636,7 @@ async function executeSchedulesTool(
 
     case 'publish':
       if (!args.from || !args.to) return { content: { error: 'from and to dates required' }, isError: true };
-      const validation = validateDateRange(args.from as string, args.to as string);
+      const validation = validateDateRange(args.from, args.to);
       if (!validation.valid) return { content: { error: validation.error }, isError: true };
       await client.publishSchedules(args.from as string, args.to as string, args.department_ids as number[] | undefined);
       return { content: { success: true, message: 'Schedules published' } };
@@ -577,13 +651,10 @@ async function executeTimesheetsTool(
   action: string,
   args: Record<string, unknown>
 ): Promise<{ content: unknown; isError?: boolean }> {
-  const page = (args.page as number) || 1;
-  const limit = (args.limit as number) || 50;
-
   switch (action) {
     case 'shifts': {
       if (!args.from || !args.to) return { content: { error: 'from and to dates required' }, isError: true };
-      const validation = validateDateRange(args.from as string, args.to as string);
+      const validation = validateDateRange(args.from, args.to);
       if (!validation.valid) return { content: { error: validation.error }, isError: true };
 
       const shifts = await client.getShifts({
@@ -591,12 +662,13 @@ async function executeTimesheetsTool(
         to: args.to as string,
         user_ids: args.user_ids as number[] | undefined,
       });
-      return { content: paginateResults(shifts, page, limit) };
+      const rows = (shifts as unknown as Record<string, unknown>[]).map(shiftRow);
+      return { content: paginateResults(rows, args, { hours: round2(rows.reduce((sum, r) => sum + (r.hours as number), 0)) }) };
     }
 
     case 'timesheets': {
       if (!args.from || !args.to) return { content: { error: 'from and to dates required' }, isError: true };
-      const validation = validateDateRange(args.from as string, args.to as string);
+      const validation = validateDateRange(args.from, args.to);
       if (!validation.valid) return { content: { error: validation.error }, isError: true };
 
       const timesheets = await client.getTimesheets({
@@ -605,8 +677,15 @@ async function executeTimesheetsTool(
         user_ids: args.user_ids as number[] | undefined,
         approved: args.approved as boolean | undefined,
         include_costs: args.include_costs as boolean | undefined,
+        include_empty: args.include_empty === true,
       });
-      return { content: paginateResults(timesheets, page, limit) };
+      const rows = (timesheets as unknown as Record<string, unknown>[]).map(timesheetRow);
+      return {
+        content: paginateResults(rows, args, {
+          hours: round2(rows.reduce((sum, r) => sum + (r.hours as number), 0)),
+          total_cost: round2(rows.reduce((sum, r) => sum + ((r.total_cost as number) || 0), 0)),
+        }),
+      };
     }
 
     case 'approve_shift':
@@ -631,9 +710,6 @@ async function executeLeaveTool(
   action: string,
   args: Record<string, unknown>
 ): Promise<{ content: unknown; isError?: boolean }> {
-  const page = (args.page as number) || 1;
-  const limit = (args.limit as number) || 50;
-
   switch (action) {
     case 'list': {
       const today = new Date();
@@ -652,7 +728,7 @@ async function executeLeaveTool(
         user_ids: args.user_ids as number[] | undefined,
         status: args.status as string | undefined,
       });
-      return { content: paginateResults(requests, page, limit) };
+      return { content: paginateResults(requests, args) };
     }
 
     case 'create':
@@ -737,28 +813,25 @@ async function executeReferenceTool(
   action: string,
   args: Record<string, unknown>
 ): Promise<{ content: unknown; isError?: boolean }> {
-  const page = (args.page as number) || 1;
-  const limit = (args.limit as number) || 50;
-
   switch (action) {
     case 'departments': {
       const depts = await client.getDepartments();
-      return { content: paginateResults(depts, page, limit) };
+      return { content: paginateResults(depts, args) };
     }
 
     case 'locations': {
       const locs = await client.getLocations();
-      return { content: paginateResults(locs, page, limit) };
+      return { content: paginateResults(locs, args) };
     }
 
     case 'teams': {
       const teams = await client.getTeams();
-      return { content: paginateResults(teams, page, limit) };
+      return { content: paginateResults(teams, args) };
     }
 
     case 'daily_stats': {
       if (!args.from || !args.to) return { content: { error: 'from and to dates required' }, isError: true };
-      const validation = validateDateRange(args.from as string, args.to as string);
+      const validation = validateDateRange(args.from, args.to);
       if (!validation.valid) return { content: { error: validation.error }, isError: true };
 
       const stats = await client.getDailyStats({
@@ -766,7 +839,12 @@ async function executeReferenceTool(
         to: args.to as string,
         department_ids: args.department_ids as number[] | undefined,
       });
-      return { content: paginateResults(stats, page, limit) };
+      return {
+        content: paginateResults(stats, args, {
+          scheduled_hours: round2(stats.reduce((sum, r) => sum + r.scheduled_hours, 0)),
+          actual_hours: round2(stats.reduce((sum, r) => sum + r.actual_hours, 0)),
+        }),
+      };
     }
 
     default:
@@ -779,28 +857,26 @@ async function executeRealtimeTool(
   action: string,
   args: Record<string, unknown>
 ): Promise<{ content: unknown; isError?: boolean }> {
-  const page = (args.page as number) || 1;
-  const limit = (args.limit as number) || 50;
-
   switch (action) {
     case 'active_shifts': {
       const shifts = await client.getActiveShifts();
-      return { content: paginateResults(shifts, page, limit) };
+      const rows = (shifts as unknown as Record<string, unknown>[]).map((sh) => ({ ...sh, start_iso: toZonedISO(sh.start) }));
+      return { content: paginateResults(rows, args) };
     }
 
     case 'clocked_in': {
       const users = await client.getClockedInUsers();
-      return { content: paginateResults(users, page, limit) };
+      return { content: paginateResults(userRows(users, args), args) };
     }
 
     case 'shift_limits': {
       const limits = await client.getShiftLimits(args.user_ids as number[] | undefined);
-      return { content: paginateResults(limits, page, limit) };
+      return { content: paginateResults(limits, args) };
     }
 
     case 'award_interpretation': {
       if (!args.from || !args.to) return { content: { error: 'from and to dates required' }, isError: true };
-      const validation = validateDateRange(args.from as string, args.to as string);
+      const validation = validateDateRange(args.from, args.to);
       if (!validation.valid) return { content: { error: validation.error }, isError: true };
 
       const awards = await client.getAwardInterpretation({
@@ -808,12 +884,12 @@ async function executeRealtimeTool(
         to: args.to as string,
         user_ids: args.user_ids as number[] | undefined,
       });
-      return { content: paginateResults(awards, page, limit) };
+      return { content: paginateResults(awards, args) };
     }
 
     case 'roster_costs': {
       if (!args.from || !args.to) return { content: { error: 'from and to dates required' }, isError: true };
-      const validation = validateDateRange(args.from as string, args.to as string);
+      const validation = validateDateRange(args.from, args.to);
       if (!validation.valid) return { content: { error: validation.error }, isError: true };
 
       const costs = await client.getRosterCosts({
@@ -821,7 +897,7 @@ async function executeRealtimeTool(
         to: args.to as string,
         department_ids: args.department_ids as number[] | undefined,
       });
-      return { content: paginateResults(costs, page, limit) };
+      return { content: paginateResults(costs, args) };
     }
 
     default:
@@ -834,13 +910,10 @@ async function executeUnavailabilityTool(
   action: string,
   args: Record<string, unknown>
 ): Promise<{ content: unknown; isError?: boolean }> {
-  const page = (args.page as number) || 1;
-  const limit = (args.limit as number) || 50;
-
   switch (action) {
     case 'list': {
       if (!args.from || !args.to) return { content: { error: 'from and to dates required' }, isError: true };
-      const validation = validateDateRange(args.from as string, args.to as string);
+      const validation = validateDateRange(args.from, args.to);
       if (!validation.valid) return { content: { error: validation.error }, isError: true };
 
       const unavail = await client.getUnavailability({
@@ -848,7 +921,12 @@ async function executeUnavailabilityTool(
         to: args.to as string,
         user_ids: args.user_ids as number[] | undefined,
       });
-      return { content: paginateResults(unavail, page, limit) };
+      const rows = (unavail as unknown as Record<string, unknown>[]).map((u) => ({
+        ...u,
+        start_iso: toZonedISO(u.start),
+        finish_iso: toZonedISO(u.finish),
+      }));
+      return { content: paginateResults(rows, args) };
     }
 
     case 'create':
@@ -885,7 +963,7 @@ async function executeSupervisorsTool(
   switch (action) {
     case 'detect_overlaps': {
       if (!args.from || !args.to) return { content: { error: 'from and to dates required' }, isError: true };
-      const validation = validateDateRange(args.from as string, args.to as string);
+      const validation = validateDateRange(args.from, args.to);
       if (!validation.valid) return { content: { error: validation.error }, isError: true };
 
       return {
@@ -903,7 +981,7 @@ async function executeSupervisorsTool(
 
     case 'recommendations': {
       if (!args.from || !args.to) return { content: { error: 'from and to dates required' }, isError: true };
-      const validation = validateDateRange(args.from as string, args.to as string);
+      const validation = validateDateRange(args.from, args.to);
       if (!validation.valid) return { content: { error: validation.error }, isError: true };
 
       const request: OptimizationRequest = {
@@ -917,7 +995,7 @@ async function executeSupervisorsTool(
 
     case 'optimize': {
       if (!args.from || !args.to) return { content: { error: 'from and to dates required' }, isError: true };
-      const validation = validateDateRange(args.from as string, args.to as string);
+      const validation = validateDateRange(args.from, args.to);
       if (!validation.valid) return { content: { error: validation.error }, isError: true };
 
       const request: OptimizationRequest = {

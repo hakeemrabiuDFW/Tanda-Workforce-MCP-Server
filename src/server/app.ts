@@ -8,6 +8,7 @@ import { logger } from '../utils/logger';
 import { oauthManager } from '../auth/oauth';
 import { requireAuth, requireMcpAuth, errorHandler, extractBearerToken } from '../auth/middleware';
 import { createMCPRouter } from '../mcp/handler';
+import { pickUserFields } from '../mcp/privacy';
 import { exchangeCodeForToken, TandaClient } from '../tanda/client';
 
 export function createApp(): Application {
@@ -570,7 +571,7 @@ export function createApp(): Application {
   app.get('/api/me', requireAuth, async (req: Request, res: Response) => {
     try {
       const user = await req.auth!.tandaClient.getCurrentUser();
-      res.json(user);
+      res.json(pickUserFields(user as unknown as Record<string, unknown>));
     } catch (error) {
       res.status(500).json({
         error: 'API Error',
