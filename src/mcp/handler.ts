@@ -1,7 +1,8 @@
 import { Request, Response } from 'express';
 import { config } from '../config/environment';
 import { logger } from '../utils/logger';
-import { tandaTools, executeTool, getAvailableTools, finalizeContent } from './tools';
+import { executeTool, getAvailableTools, finalizeContent, isKnownTool } from './tools';
+import { TandaApiError } from '../tanda/client';
 import { pickUserFields } from './privacy';
 import { TandaClient } from '../tanda/client';
 
@@ -87,7 +88,7 @@ export class MCPHandler {
       return this.createErrorResponse(
         request.id,
         MCP_ERROR_CODES.INTERNAL_ERROR,
-        error instanceof Error ? error.message : 'Internal error'
+        'Internal error while handling the request. Retry; if it persists check server logs.'
       );
     }
   }
@@ -153,8 +154,7 @@ export class MCPHandler {
       );
     }
 
-    const tool = tandaTools.find((t) => t.name === params.name);
-    if (!tool) {
+    if (!isKnownTool(params.name)) {
       return this.createErrorResponse(
         request.id,
         MCP_ERROR_CODES.METHOD_NOT_FOUND,
@@ -171,7 +171,7 @@ export class MCPHandler {
         content: [
           {
             type: 'text',
-            text: JSON.stringify(result.content, null, 2),
+            text: JSON.stringify(result.content),
           },
         ],
         isError: result.isError,
@@ -264,7 +264,7 @@ export class MCPHandler {
             {
               uri: params.uri,
               mimeType: 'application/json',
-              text: JSON.stringify(content, null, 2),
+              text: JSON.stringify(content),
             },
           ],
         },
@@ -273,7 +273,7 @@ export class MCPHandler {
       return this.createErrorResponse(
         request.id,
         MCP_ERROR_CODES.INTERNAL_ERROR,
-        error instanceof Error ? error.message : 'Failed to read resource'
+        error instanceof TandaApiError ? error.message : 'Failed to read resource. Retry shortly.'
       );
     }
   }
@@ -385,7 +385,9 @@ export class MCPHandler {
 1. Total scheduled shifts
 2. Coverage by department
 3. Any gaps or understaffing
-4. Pending leave requests that might affect coverage`,
+4. Pending leave requests that might affect coverage
+
+Use tanda_schedules (from/to), tanda_coverage (mode=gaps) and tanda_time_off (kind=leave status=pending).`,
                 },
               },
             ],
@@ -427,10 +429,10 @@ export class MCPHandler {
                 content: {
                   type: 'text',
                   text: `Generate a real-time workforce dashboard showing:
-1. Currently active shifts (use tanda_realtime action=active_shifts)
-2. Clocked-in employees (use tanda_realtime action=clocked_in)
-3. Current roster period (use tanda_rosters action=current)
-4. Pending leave requests (use tanda_leave action=list status=pending)
+1. Who is clocked in now and shifts open > 12h (use tanda_live)
+2. Today's rostered shifts by site (use tanda_schedules)
+3. Open exceptions (use tanda_exceptions)
+4. Pending leave requests (use tanda_time_off kind=leave status=pending)
 
 Format with clear sections and highlight items requiring attention.`,
                 },
@@ -452,9 +454,9 @@ Format with clear sections and highlight items requiring attention.`,
                   type: 'text',
                   text: `Perform a compliance check${promptArgs.date ? ` for ${promptArgs.date}` : ' for today'}${promptArgs.user_id ? ` for user ${promptArgs.user_id}` : ' for all active users'}:
 
-1. Check shift hour limits (use tanda_realtime action=shift_limits)
-2. Review break compliance (use tanda_timesheets action=breaks shift_id=X)
-3. Verify award interpretation (use tanda_realtime action=award_interpretation)
+1. Run tanda_exceptions (open shifts > 12h, zero-length shifts, > 40h weeks, missing award templates)
+2. Review breaks and pay codes (use tanda_timesheets view=shifts)
+3. Check unapproved timesheet cost by site (tanda_exceptions checks=[unapproved_timesheet_cost])
 
 Provide a summary with:
 - ✅ Compliant items
@@ -479,10 +481,9 @@ Provide a summary with:
                   type: 'text',
                   text: `Plan leave for user ${promptArgs.user_id || '[user_id]'}:
 
-1. Get leave balances (use tanda_leave action=balances user_id=X)
-2. Show available types (use tanda_leave action=types user_id=X)
-3. Calculate hours needed (use tanda_leave action=calculate_hours)
-4. Check team coverage (use tanda_schedules action=list from/to)`,
+1. Get leave balances and types (use tanda_time_off kind=balances user_id=X)
+2. Check existing leave (use tanda_time_off kind=leave)
+3. Check team coverage (use tanda_schedules from/to and tanda_coverage)`,
                 },
               },
             ],

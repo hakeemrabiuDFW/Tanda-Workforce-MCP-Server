@@ -10,6 +10,15 @@ export interface RecordedRequest {
 
 export type RouteHandler = (req: RecordedRequest) => unknown | { __status: number; __headers?: Record<string, string>; body?: unknown };
 
+let counter = 0;
+
+/** Empty org/user lookups so tools that enrich rows work without extra stubs. */
+const DEFAULT_ROUTES: Array<[string | RegExp, RouteHandler]> = [
+  ['/locations', () => []],
+  ['/departments', () => []],
+  ['/users', () => []],
+];
+
 /**
  * Build a TandaClient backed by an in-memory router instead of the network.
  * Routes are matched against the path (without /api/v2 base) using exact strings or regexes.
@@ -34,7 +43,8 @@ export function fakeTanda(routes: Array<[string | RegExp, RouteHandler]>) {
     };
     requests.push(req);
 
-    const route = routes.find(([m]) => (typeof m === 'string' ? m === req.path : m.test(req.path)));
+    const all = [...routes, ...DEFAULT_ROUTES];
+    const route = all.find(([m]) => (typeof m === 'string' ? m === req.path : m.test(req.path)));
     let status = 200;
     let headers: Record<string, string> = {};
     let data: unknown = route ? route[1](req) : undefined;
@@ -59,7 +69,8 @@ export function fakeTanda(routes: Array<[string | RegExp, RouteHandler]>) {
     return response;
   };
 
-  const client = new TandaClient('fake-token', undefined, undefined, { adapter, disableRateLimit: true });
+  // Unique token per fake so the shared ETag/org cache never leaks between tests
+  const client = new TandaClient(`fake-token-${++counter}`, undefined, undefined, { adapter, disableRateLimit: true });
   return { client, requests };
 }
 

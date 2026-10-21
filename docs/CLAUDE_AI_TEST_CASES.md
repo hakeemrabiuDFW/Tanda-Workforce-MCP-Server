@@ -1,3 +1,5 @@
+> **Note (v4.0):** tool names in this document are from v3.x. They still work as deprecated aliases for one release; see the README for the 12 v4 tools.
+
 # Claude.ai MCP Server Test Cases
 
 These test cases are designed to be run through Claude.ai after connecting to the Tanda Workforce MCP Server.

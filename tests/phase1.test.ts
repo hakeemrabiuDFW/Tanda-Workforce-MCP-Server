@@ -76,8 +76,9 @@ describe('7-day chunking', () => {
     const { client, requests } = fakeTanda([['/schedules', () => [{ id: 1, start: START, finish: START + 3600 }]]]);
     const res = await executeTool(client, 'tanda_schedules', { action: 'list', from: '2026-10-01', to: '2026-10-20' });
     expect(res.isError).toBeFalsy();
-    expect(requests).toHaveLength(3);
-    for (const r of requests) {
+    const scheduleCalls = requests.filter((r) => r.path === '/schedules');
+    expect(scheduleCalls).toHaveLength(3);
+    for (const r of scheduleCalls) {
       const days = (Date.parse(r.params.to) - Date.parse(r.params.from)) / 86400000 + 1;
       expect(days).toBeLessThanOrEqual(7);
     }
@@ -90,6 +91,7 @@ describe('tanda_get_staff_by_department', () => {
   it('returns only users in department.staff', async () => {
     const { client } = fakeTanda([
       ['/departments/10', () => ({ id: 10, name: 'Lincoln HS', staff: [1, 3] })],
+      ['/departments', () => [{ id: 10, name: 'Lincoln HS', staff: [1, 3] }, { id: 11, name: 'Other', staff: [2, 3] }]],
       ['/users', () => [
         { id: 1, name: 'A', department_ids: [10] },
         { id: 2, name: 'B', department_ids: [11] },
@@ -117,13 +119,15 @@ describe('tanda_get_timesheets', () => {
   it('de-duplicates timesheets returned for every day of the pay period and drops empty ones', async () => {
     const { client, requests } = fakeTanda(routes());
     const res = await executeTool(client, 'tanda_timesheets', { action: 'timesheets', from: '2026-10-19', to: '2026-10-25' });
-    const content = res.content as { rows: Array<{ id: number; hours: number }>; summary: { total_cost: number } };
+    const content = res.content as { rows: Array<{ id: number; hours: number }>; summary: { cost: number } };
     expect(content.rows.map((r) => r.id)).toEqual([1]);
     expect(content.rows[0].hours).toBe(8);
-    expect(content.summary.total_cost).toBe(120);
+    expect(content.summary.cost).toBe(120);
     // One call per pay period, not one per day
-    expect(requests).toHaveLength(1);
-    expect(requests[0].params.show_costs).toBe('true');
+    const sheetCalls = requests.filter((r) => r.path.startsWith('/timesheets/on/'));
+    expect(sheetCalls).toHaveLength(1);
+    expect(sheetCalls[0].params.show_costs).toBe('true');
+    expect(sheetCalls[0].params.show_award_interpretation).toBe('true');
   });
 
   it('keeps empty timesheets when include_empty=true', async () => {

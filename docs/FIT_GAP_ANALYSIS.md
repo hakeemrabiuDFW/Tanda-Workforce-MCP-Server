@@ -1,3 +1,5 @@
+> **Note (v4.0):** tool names in this document are from v3.x. They still work as deprecated aliases for one release; see the README for the 12 v4 tools.
+
 # Tanda Workforce MCP Server - Fit-Gap Analysis
 
 ## Executive Summary
