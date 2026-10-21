@@ -2,6 +2,8 @@ import request from 'supertest';
 import { createApp } from '../src/server/app';
 import { Application } from 'express';
 
+const AUTH = `Bearer ${process.env.MCP_SHARED_SECRET}`;
+
 describe('MCP Protocol Endpoints', () => {
   let app: Application;
 
@@ -14,6 +16,7 @@ describe('MCP Protocol Endpoints', () => {
       it('should initialize MCP session', async () => {
         const response = await request(app)
           .post('/mcp')
+          .set('Authorization', AUTH)
           .send({
             jsonrpc: '2.0',
             id: 1,
@@ -38,6 +41,7 @@ describe('MCP Protocol Endpoints', () => {
       it('should return server info in initialize response', async () => {
         const response = await request(app)
           .post('/mcp')
+          .set('Authorization', AUTH)
           .send({
             jsonrpc: '2.0',
             id: 1,
@@ -58,6 +62,7 @@ describe('MCP Protocol Endpoints', () => {
       it('should return capabilities in initialize response', async () => {
         const response = await request(app)
           .post('/mcp')
+          .set('Authorization', AUTH)
           .send({
             jsonrpc: '2.0',
             id: 1,
@@ -80,6 +85,7 @@ describe('MCP Protocol Endpoints', () => {
       it('should list available tools', async () => {
         const response = await request(app)
           .post('/mcp')
+          .set('Authorization', AUTH)
           .send({
             jsonrpc: '2.0',
             id: 2,
@@ -98,6 +104,7 @@ describe('MCP Protocol Endpoints', () => {
       it('should return exactly 9 consolidated tools (v4.0)', async () => {
         const response = await request(app)
           .post('/mcp')
+          .set('Authorization', AUTH)
           .send({
             jsonrpc: '2.0',
             id: 2,
@@ -112,6 +119,7 @@ describe('MCP Protocol Endpoints', () => {
       it('should include expected v4.0 consolidated tools', async () => {
         const response = await request(app)
           .post('/mcp')
+          .set('Authorization', AUTH)
           .send({
             jsonrpc: '2.0',
             id: 2,
@@ -134,6 +142,7 @@ describe('MCP Protocol Endpoints', () => {
       it('should have tool definitions with action enum', async () => {
         const response = await request(app)
           .post('/mcp')
+          .set('Authorization', AUTH)
           .send({
             jsonrpc: '2.0',
             id: 2,
@@ -152,6 +161,7 @@ describe('MCP Protocol Endpoints', () => {
       it('should have pagination params on list tools', async () => {
         const response = await request(app)
           .post('/mcp')
+          .set('Authorization', AUTH)
           .send({
             jsonrpc: '2.0',
             id: 2,
@@ -166,7 +176,7 @@ describe('MCP Protocol Endpoints', () => {
     });
 
     describe('tools/call', () => {
-      it('should require authentication for tool calls', async () => {
+      it('should reject unauthenticated tool calls with 401', async () => {
         const response = await request(app)
           .post('/mcp')
           .send({
@@ -178,15 +188,16 @@ describe('MCP Protocol Endpoints', () => {
               arguments: { action: 'current' },
             },
           })
-          .expect(200);
+          .expect(401);
 
-        expect(response.body).toHaveProperty('error');
-        expect(response.body.error.message).toContain('Authentication required');
+        expect(response.body).toHaveProperty('error', 'unauthorized');
+        expect(response.headers['www-authenticate']).toContain('resource_metadata');
       });
 
       it('should return error for unknown tool', async () => {
         const response = await request(app)
           .post('/mcp')
+          .set('Authorization', AUTH)
           .send({
             jsonrpc: '2.0',
             id: 3,
@@ -206,6 +217,7 @@ describe('MCP Protocol Endpoints', () => {
       it('should list available resources', async () => {
         const response = await request(app)
           .post('/mcp')
+          .set('Authorization', AUTH)
           .send({
             jsonrpc: '2.0',
             id: 4,
@@ -226,6 +238,7 @@ describe('MCP Protocol Endpoints', () => {
       it('should list available prompts', async () => {
         const response = await request(app)
           .post('/mcp')
+          .set('Authorization', AUTH)
           .send({
             jsonrpc: '2.0',
             id: 5,
@@ -246,6 +259,7 @@ describe('MCP Protocol Endpoints', () => {
       it('should respond to ping', async () => {
         const response = await request(app)
           .post('/mcp')
+          .set('Authorization', AUTH)
           .send({
             jsonrpc: '2.0',
             id: 6,
@@ -264,6 +278,7 @@ describe('MCP Protocol Endpoints', () => {
       it('should return error for unknown method', async () => {
         const response = await request(app)
           .post('/mcp')
+          .set('Authorization', AUTH)
           .send({
             jsonrpc: '2.0',
             id: 7,
@@ -282,6 +297,7 @@ describe('MCP Protocol Endpoints', () => {
     it('should handle MCP requests at root endpoint', async () => {
       const response = await request(app)
         .post('/')
+        .set('Authorization', AUTH)
         .send({
           jsonrpc: '2.0',
           id: 1,
@@ -302,6 +318,7 @@ describe('MCP Protocol Endpoints', () => {
     it('should list tools at root endpoint', async () => {
       const response = await request(app)
         .post('/')
+        .set('Authorization', AUTH)
         .send({
           jsonrpc: '2.0',
           id: 2,
@@ -325,6 +342,7 @@ describe('MCP v4.0 Consolidated Tool Definitions', () => {
   it('should have proper inputSchema for each tool', async () => {
     const response = await request(app)
       .post('/mcp')
+          .set('Authorization', AUTH)
       .send({
         jsonrpc: '2.0',
         id: 1,
@@ -339,21 +357,22 @@ describe('MCP v4.0 Consolidated Tool Definitions', () => {
   });
 
   const v4Tools = [
-    { name: 'tanda_users', actions: ['list', 'get', 'inactive', 'onboard', 'invite', 'by_department', 'current'] },
-    { name: 'tanda_schedules', actions: ['list', 'get', 'create', 'update', 'delete', 'publish'] },
-    { name: 'tanda_timesheets', actions: ['shifts', 'timesheets', 'approve_shift', 'approve_timesheet', 'breaks'] },
-    { name: 'tanda_leave', actions: ['list', 'create', 'approve', 'decline', 'delete', 'balances', 'types', 'calculate_hours'] },
+    { name: 'tanda_users', actions: ['list', 'get', 'inactive', 'by_department', 'current'] },
+    { name: 'tanda_schedules', actions: ['list', 'get'] },
+    { name: 'tanda_timesheets', actions: ['shifts', 'timesheets', 'breaks'] },
+    { name: 'tanda_leave', actions: ['list', 'balances', 'types', 'calculate_hours'] },
     { name: 'tanda_rosters', actions: ['get', 'current', 'by_date'] },
     { name: 'tanda_reference', actions: ['departments', 'locations', 'teams', 'daily_stats'] },
     { name: 'tanda_realtime', actions: ['active_shifts', 'clocked_in', 'shift_limits', 'award_interpretation', 'roster_costs'] },
-    { name: 'tanda_unavailability', actions: ['list', 'create', 'delete'] },
-    { name: 'tanda_supervisors', actions: ['detect_overlaps', 'evening_coverage', 'recommendations', 'optimize', 'validate', 'create_optimized'] },
+    { name: 'tanda_unavailability', actions: ['list'] },
+    { name: 'tanda_supervisors', actions: ['detect_overlaps', 'evening_coverage', 'recommendations', 'optimize', 'validate'] },
   ];
 
   v4Tools.forEach(({ name, actions }) => {
     it(`should have ${name} tool with correct actions`, async () => {
       const response = await request(app)
         .post('/mcp')
+          .set('Authorization', AUTH)
         .send({
           jsonrpc: '2.0',
           id: 1,
@@ -379,6 +398,7 @@ describe('MCP v4.0 Features', () => {
     it('should list prompts', async () => {
       const response = await request(app)
         .post('/mcp')
+          .set('Authorization', AUTH)
         .send({
           jsonrpc: '2.0',
           id: 1,
@@ -389,13 +409,14 @@ describe('MCP v4.0 Features', () => {
       const promptNames = response.body.result.prompts.map((p: { name: string }) => p.name);
       expect(promptNames).toContain('workforce_dashboard');
       expect(promptNames).toContain('compliance_check');
-      expect(promptNames).toContain('onboard_employee');
+      expect(promptNames).not.toContain('onboard_employee');
       expect(promptNames).toContain('leave_planner');
     });
 
     it('should get workforce_dashboard prompt with v4.0 tool references', async () => {
       const response = await request(app)
         .post('/mcp')
+          .set('Authorization', AUTH)
         .send({
           jsonrpc: '2.0',
           id: 1,
@@ -417,6 +438,7 @@ describe('MCP v4.0 Features', () => {
     it('should have exactly 9 consolidated tools in v4.0', async () => {
       const response = await request(app)
         .post('/mcp')
+          .set('Authorization', AUTH)
         .send({
           jsonrpc: '2.0',
           id: 1,
@@ -427,9 +449,10 @@ describe('MCP v4.0 Features', () => {
       expect(response.body.result.tools.length).toBe(9);
     });
 
-    it('should have 6 prompts', async () => {
+    it('should have 5 read-only prompts', async () => {
       const response = await request(app)
         .post('/mcp')
+          .set('Authorization', AUTH)
         .send({
           jsonrpc: '2.0',
           id: 1,
@@ -437,7 +460,7 @@ describe('MCP v4.0 Features', () => {
         })
         .expect(200);
 
-      expect(response.body.result.prompts.length).toBe(6);
+      expect(response.body.result.prompts.length).toBe(5);
     });
   });
 
@@ -445,6 +468,7 @@ describe('MCP v4.0 Features', () => {
     it('should have short descriptions (< 150 chars)', async () => {
       const response = await request(app)
         .post('/mcp')
+          .set('Authorization', AUTH)
         .send({
           jsonrpc: '2.0',
           id: 1,

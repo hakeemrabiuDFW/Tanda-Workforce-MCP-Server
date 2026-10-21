@@ -8,7 +8,7 @@ import { OptimizationRequest } from '../supervisor/types';
 // Consolidated from 44 tools to 9 grouped tools with action parameters
 // Optimized for Claude.ai context window efficiency
 
-// v4.0: Write actions that are blocked in read-only mode
+// Write actions are never exposed or executed: this server is read-only.
 const WRITE_ACTIONS = new Set([
   'users:onboard',
   'users:invite',
@@ -92,7 +92,7 @@ function validateDateRange(from: string, to: string, maxDays: number = 14): { va
 
 const LITE_MODE_TOOLS = ['tanda_users', 'tanda_schedules', 'tanda_reference', 'tanda_timesheets', 'tanda_leave', 'tanda_realtime'];
 
-export const tandaTools: MCPTool[] = [
+const allTools: MCPTool[] = [
   // 1. USER MANAGEMENT
   {
     name: 'tanda_users',
@@ -353,10 +353,25 @@ export const tandaTools: MCPTool[] = [
   },
 ];
 
-// v4.0: Check if action is allowed based on read-only mode
+// Remove write actions from each tool's action enum so clients never see them
+export const tandaTools: MCPTool[] = allTools.map((tool) => {
+  const prefix = tool.name.replace('tanda_', '');
+  const action = tool.inputSchema.properties.action as { enum?: string[] } | undefined;
+  if (!action?.enum) return tool;
+  return {
+    ...tool,
+    inputSchema: {
+      ...tool.inputSchema,
+      properties: {
+        ...tool.inputSchema.properties,
+        action: { ...action, enum: action.enum.filter((a) => !WRITE_ACTIONS.has(`${prefix}:${a}`)) },
+      },
+    },
+  };
+});
+
+// Read-only: write actions are always rejected
 export function isToolAllowed(toolName: string, action?: string): boolean {
-  if (!config.MCP_READ_ONLY_MODE) return true;
-  
   if (action) {
     const key = `${toolName.replace('tanda_', '')}:${action}`;
     return !WRITE_ACTIONS.has(key);
@@ -383,10 +398,9 @@ export async function executeTool(
   const action = args.action as string;
   logger.debug(`Executing tool: ${toolName}`, { action, args });
 
-  // Check read-only mode
-  if (config.MCP_READ_ONLY_MODE && !isToolAllowed(toolName, action)) {
+  if (!isToolAllowed(toolName, action)) {
     return {
-      content: { error: `Action '${action}' not available in read-only mode.` },
+      content: { error: `Action '${action}' is not available: this server is read-only.` },
       isError: true,
     };
   }
