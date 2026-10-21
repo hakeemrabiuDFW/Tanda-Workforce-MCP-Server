@@ -80,6 +80,13 @@ export class TandaClient {
     // Request interceptor - add auth token
     this.client.interceptors.request.use(
       (requestConfig) => {
+        // This server is read-only: never send a mutating request to Tanda.
+        const method = (requestConfig.method || 'get').toLowerCase();
+        if (method !== 'get' && method !== 'head') {
+          return Promise.reject(
+            new TandaApiError(`Read-only server: ${method.toUpperCase()} requests to Tanda are disabled`, 403)
+          );
+        }
         requestConfig.headers.Authorization = `Bearer ${this.accessToken}`;
         logger.debug(`Tanda API Request: ${requestConfig.method?.toUpperCase()} ${requestConfig.url}`);
         return requestConfig;
@@ -97,6 +104,7 @@ export class TandaClient {
         return response;
       },
       async (error: AxiosError) => {
+        if (error instanceof TandaApiError) throw error;
         if (error.response?.status === 401 && this.refreshToken) {
           try {
             await this.refreshAccessToken();
@@ -853,9 +861,8 @@ export async function exchangeCodeForToken(code: string): Promise<TandaTokenResp
 }
 
 export function buildAuthorizationUrl(state: string, scope?: string): string {
-  // Tanda requires the scope parameter - use provided scope or default to common scopes
-  // Note: qualification and device scopes are not supported by Workforce.com OAuth
-  const defaultScopes = 'me user department leave roster timesheet cost';
+  // Least-privilege scopes from TANDA_SCOPES (financial/personal are always stripped)
+  const defaultScopes = config.TANDA_OAUTH_SCOPES.join(' ');
 
   const params = new URLSearchParams({
     client_id: config.TANDA_CLIENT_ID,

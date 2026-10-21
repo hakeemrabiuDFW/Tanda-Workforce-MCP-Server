@@ -91,6 +91,7 @@ describe('Server Endpoints', () => {
     it('should return server statistics', async () => {
       const response = await request(app)
         .get('/stats')
+        .set('Authorization', `Bearer ${process.env.MCP_SHARED_SECRET}`)
         .expect('Content-Type', /json/)
         .expect(200);
 

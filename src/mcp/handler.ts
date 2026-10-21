@@ -339,22 +339,6 @@ export class MCPHandler {
             ],
           },
           {
-            name: 'onboard_employee',
-            description: 'Step-by-step guided employee onboarding workflow',
-            arguments: [
-              {
-                name: 'email',
-                description: 'New employee email address',
-                required: true,
-              },
-              {
-                name: 'name',
-                description: 'New employee full name',
-                required: true,
-              },
-            ],
-          },
-          {
             name: 'leave_planner',
             description: 'Check leave balances, available types, and plan leave requests',
             arguments: [
@@ -445,8 +429,7 @@ export class MCPHandler {
 1. Currently active shifts (use tanda_realtime action=active_shifts)
 2. Clocked-in employees (use tanda_realtime action=clocked_in)
 3. Current roster period (use tanda_rosters action=current)
-4. Shift limit warnings (use tanda_realtime action=shift_limits)
-5. Pending leave requests (use tanda_leave action=list status=pending)
+4. Pending leave requests (use tanda_leave action=list status=pending)
 
 Format with clear sections and highlight items requiring attention.`,
                 },
@@ -482,31 +465,6 @@ Provide a summary with:
           },
         };
 
-      case 'onboard_employee':
-        return {
-          jsonrpc: '2.0',
-          id: request.id,
-          result: {
-            description: 'Employee onboarding workflow',
-            messages: [
-              {
-                role: 'user',
-                content: {
-                  type: 'text',
-                  text: `Onboard new employee:
-- Email: ${promptArgs.email || '[employee email]'}
-- Name: ${promptArgs.name || '[employee name]'}
-
-Steps:
-1. List departments (use tanda_reference action=departments)
-2. Create user (use tanda_users action=onboard users=[{email, name, department_ids, send_invite: true}])
-3. Confirm success and suggest next steps`,
-                },
-              },
-            ],
-          },
-        };
-
       case 'leave_planner':
         return {
           jsonrpc: '2.0',
@@ -523,8 +481,7 @@ Steps:
 1. Get leave balances (use tanda_leave action=balances user_id=X)
 2. Show available types (use tanda_leave action=types user_id=X)
 3. Calculate hours needed (use tanda_leave action=calculate_hours)
-4. Check team coverage (use tanda_schedules action=list from/to)
-5. Create leave request (use tanda_leave action=create)`,
+4. Check team coverage (use tanda_schedules action=list from/to)`,
                 },
               },
             ],

@@ -9,6 +9,8 @@ process.env.SESSION_SECRET = 'test-session-secret-must-be-32-chars-long';
 process.env.JWT_SECRET = 'test-jwt-secret-must-be-32-characters';
 process.env.PORT = '3001';
 process.env.HOST = 'localhost';
+process.env.MCP_SHARED_SECRET = 'test-mcp-shared-secret-at-least-32-chars';
+process.env.TANDA_ACCESS_TOKEN = 'test-tanda-access-token';
 
 // Suppress console output during tests
 beforeAll(() => {

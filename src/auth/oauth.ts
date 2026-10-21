@@ -40,7 +40,7 @@ setInterval(() => {
       authCodes.delete(code);
     }
   }
-}, 60 * 1000); // Run every minute
+}, 60 * 1000).unref(); // Run every minute
 
 // Session cleanup interval (remove expired sessions)
 const SESSION_TTL_MS = 24 * 60 * 60 * 1000; // 24 hours
@@ -52,7 +52,7 @@ setInterval(() => {
       logger.debug(`Cleaned up expired session: ${sessionId}`);
     }
   }
-}, 60 * 60 * 1000); // Run every hour
+}, 60 * 60 * 1000).unref(); // Run every hour
 
 export interface JWTPayload {
   sessionId: string;

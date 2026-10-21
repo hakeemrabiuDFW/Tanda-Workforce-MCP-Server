@@ -1,5 +1,6 @@
 import { z } from 'zod';
 import dotenv from 'dotenv';
+import { parseScopes } from './scopes';
 
 dotenv.config();
 
@@ -88,6 +89,13 @@ const environmentSchema = z.object({
   TANDA_API_BASE_URL: z.string().url().default('https://my.tanda.co/api/v2'),
   TANDA_AUTH_URL: z.string().url().default('https://my.tanda.co/api/oauth/authorize'),
   TANDA_TOKEN_URL: z.string().url().default('https://my.tanda.co/api/oauth/token'),
+  // Space/comma separated OAuth scopes. Defaults to the least-privilege set in config/scopes.ts.
+  TANDA_SCOPES: z.string().optional(),
+  // Optional Tanda access token (e.g. a password-grant token) used for shared-secret MCP auth.
+  TANDA_ACCESS_TOKEN: z.string().optional(),
+
+  // Optional bearer secret accepted on MCP routes as an alternative to OAuth.
+  MCP_SHARED_SECRET: z.string().min(32, 'MCP_SHARED_SECRET must be at least 32 characters').optional(),
 
   // Session Configuration
   SESSION_SECRET: z.string().min(32, 'SESSION_SECRET must be at least 32 characters'),
@@ -155,6 +163,11 @@ function loadEnvironment() {
       TANDA_API_BASE_URL: 'https://my.tanda.co/api/v2',
       TANDA_AUTH_URL: 'https://my.tanda.co/api/oauth/authorize',
       TANDA_TOKEN_URL: 'https://my.tanda.co/api/oauth/token',
+      TANDA_SCOPES: process.env.TANDA_SCOPES,
+      TANDA_ACCESS_TOKEN: process.env.TANDA_ACCESS_TOKEN,
+      MCP_SHARED_SECRET: process.env.MCP_SHARED_SECRET && process.env.MCP_SHARED_SECRET.length >= 32
+        ? process.env.MCP_SHARED_SECRET
+        : undefined,
       SESSION_SECRET: process.env.SESSION_SECRET || 'development-secret-change-in-production-32chars',
       JWT_SECRET: process.env.JWT_SECRET || 'development-jwt-secret-change-in-production-32',
       JWT_EXPIRY: '24h',
@@ -179,6 +192,17 @@ function loadEnvironment() {
   return result.data;
 }
 
-export const config = loadEnvironment();
+const env = loadEnvironment();
+const parsedScopes = parseScopes(env.TANDA_SCOPES);
+if (parsedScopes.rejected.length > 0) {
+  console.warn(`⚠️  Ignoring forbidden Tanda scopes: ${parsedScopes.rejected.join(', ')} (server is read-only)`);
+}
+
+export const config = {
+  ...env,
+  // Read-only is enforced unconditionally; the env flag is kept for backwards compatibility.
+  MCP_READ_ONLY_MODE: true,
+  TANDA_OAUTH_SCOPES: parsedScopes.scopes,
+};
 
 export type Environment = typeof config;

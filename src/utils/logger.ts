@@ -23,6 +23,7 @@ const jsonFormat = winston.format.combine(
 );
 
 export const logger = winston.createLogger({
+  silent: config.NODE_ENV === 'test',
   level: config.NODE_ENV === 'production' ? 'info' : 'debug',
   format: config.NODE_ENV === 'production' ? jsonFormat : logFormat,
   transports: [

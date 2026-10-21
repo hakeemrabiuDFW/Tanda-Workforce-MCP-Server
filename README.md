@@ -52,6 +52,11 @@ Strategic supervisor placement across schools with overlap prevention and evenin
 - Set `MCP_READ_ONLY_MODE=true` to disable all write operations
 - Automatically filters out write tools when listing available tools
 
+## Security
+
+All MCP routes require authentication (OAuth JWT or `MCP_SHARED_SECRET`); unauthenticated calls get `401`.
+The server is read-only and requests only least-privilege Tanda scopes. See [docs/SECURITY.md](docs/SECURITY.md).
+
 ## Features
 
 - **OAuth2 Authentication** - Secure authentication with Tanda including PKCE (RFC 7636)
