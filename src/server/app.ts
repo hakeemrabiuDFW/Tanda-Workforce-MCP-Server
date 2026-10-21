@@ -9,6 +9,7 @@ import { oauthManager } from '../auth/oauth';
 import { requireAuth, requireMcpAuth, errorHandler, extractBearerToken } from '../auth/middleware';
 import { createMCPRouter } from '../mcp/handler';
 import { pickUserFields } from '../mcp/privacy';
+import { aliasUsage } from '../mcp/tools';
 import { exchangeCodeForToken, TandaClient } from '../tanda/client';
 
 export function createApp(): Application {
@@ -591,6 +592,7 @@ export function createApp(): Application {
         memory: process.memoryUsage(),
       },
       sessions: stats,
+      deprecated_alias_usage: aliasUsage(),
     });
   });
 

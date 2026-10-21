@@ -144,3 +144,30 @@ export function withIsoTimes<T extends Record<string, unknown>>(
   }
   return out as T & Record<string, unknown>;
 }
+
+/** Unix seconds for a local wall-clock date + "HH:MM" in the given zone (DST-aware). */
+export function localToUnix(date: string, time: string, timeZone = DEFAULT_TIMEZONE): number {
+  const [h, m] = time.split(':').map(Number);
+  const naive = Date.parse(`${date}T00:00:00Z`) / 1000 + (h || 0) * 3600 + (m || 0) * 60;
+  // Guess with the zone offset at the naive instant, then correct once for DST transitions.
+  let guess = naive;
+  for (let i = 0; i < 2; i++) {
+    const iso = toZonedISO(guess, timeZone) as string;
+    const sign = iso.slice(-6, -5) === '-' ? -1 : 1;
+    const offset = sign * (Number(iso.slice(-5, -3)) * 3600 + Number(iso.slice(-2)) * 60);
+    guess = naive - offset;
+  }
+  return guess;
+}
+
+/**
+ * Parse a user-supplied time: unix seconds/ms, ISO with offset, or a local
+ * "YYYY-MM-DD HH:MM" / "YYYY-MM-DDTHH:MM" (interpreted in the configured zone).
+ */
+export function parseLocalDateTime(value: unknown, timeZone = DEFAULT_TIMEZONE): number | null {
+  if (typeof value === 'string') {
+    const m = value.trim().match(/^(\d{4}-\d{2}-\d{2})[T ](\d{2}:\d{2})(:\d{2})?$/);
+    if (m) return localToUnix(m[1], m[2], timeZone);
+  }
+  return toUnixSeconds(value);
+}

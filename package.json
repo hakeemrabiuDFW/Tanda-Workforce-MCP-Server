@@ -1,7 +1,7 @@
 {
   "name": "tanda-workforce-mcp-server",
   "version": "4.0.0",
-  "description": "Production-ready MCP Server for Tanda Workforce API with OAuth2 authentication and real-time workforce tools",
+  "description": "Read-only MCP server for the Tanda Workforce API: 12 consolidated, privacy-filtered tools with OAuth2 or shared-secret auth",
   "main": "dist/index.js",
   "types": "dist/index.d.ts",
   "scripts": {
@@ -10,12 +10,9 @@
     "dev": "ts-node src/index.ts",
     "lint": "eslint src/**/*.ts",
     "test": "jest",
-    "test:integration": "ts-node scripts/test-user-flow.ts",
-    "test:claude": "ts-node scripts/test-claude-integration.ts",
-    "test:tools": "ts-node scripts/test-all-tools.ts",
-    "test:auth": "ts-node scripts/test-authenticated-tools.ts",
     "docker:build": "docker build -t tanda-mcp-server .",
-    "docker:run": "docker run -p 3000:3000 --env-file .env tanda-mcp-server"
+    "docker:run": "docker run -p 3000:3000 --env-file .env tanda-mcp-server",
+    "smoke": "node scripts/smoke.mjs"
   },
   "keywords": [
     "mcp",

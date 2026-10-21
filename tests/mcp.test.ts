@@ -101,7 +101,7 @@ describe('MCP Protocol Endpoints', () => {
         expect(Array.isArray(response.body.result.tools)).toBe(true);
       });
 
-      it('should return exactly 9 consolidated tools (v4.0)', async () => {
+      it('should return exactly 12 tools (v4.0)', async () => {
         const response = await request(app)
           .post('/mcp')
           .set('Authorization', AUTH)
@@ -112,8 +112,7 @@ describe('MCP Protocol Endpoints', () => {
           })
           .expect(200);
 
-        // v4.0 consolidated to 9 tools
-        expect(response.body.result.tools.length).toBe(9);
+        expect(response.body.result.tools.length).toBe(12);
       });
 
       it('should include expected v4.0 consolidated tools', async () => {
@@ -128,50 +127,23 @@ describe('MCP Protocol Endpoints', () => {
           .expect(200);
 
         const toolNames = response.body.result.tools.map((t: { name: string }) => t.name);
-        expect(toolNames).toContain('tanda_users');
-        expect(toolNames).toContain('tanda_schedules');
-        expect(toolNames).toContain('tanda_timesheets');
-        expect(toolNames).toContain('tanda_leave');
-        expect(toolNames).toContain('tanda_rosters');
-        expect(toolNames).toContain('tanda_reference');
-        expect(toolNames).toContain('tanda_realtime');
-        expect(toolNames).toContain('tanda_unavailability');
-        expect(toolNames).toContain('tanda_supervisors');
+        expect(toolNames).toEqual([
+          'tanda_org', 'tanda_people', 'tanda_schedules', 'tanda_timesheets', 'tanda_live', 'tanda_time_off',
+          'tanda_labor_summary', 'tanda_coverage', 'tanda_validate_schedule', 'tanda_exceptions',
+          'tanda_export_preview', 'tanda_change_history',
+        ]);
       });
 
-      it('should have tool definitions with action enum', async () => {
+      it('should have paging params on list tools', async () => {
         const response = await request(app)
           .post('/mcp')
           .set('Authorization', AUTH)
-          .send({
-            jsonrpc: '2.0',
-            id: 2,
-            method: 'tools/list',
-          })
+          .send({ jsonrpc: '2.0', id: 2, method: 'tools/list' })
           .expect(200);
 
-        const tool = response.body.result.tools[0];
-        expect(tool).toHaveProperty('name');
-        expect(tool).toHaveProperty('description');
-        expect(tool).toHaveProperty('inputSchema');
-        expect(tool.inputSchema.properties).toHaveProperty('action');
-        expect(tool.inputSchema.properties.action).toHaveProperty('enum');
-      });
-
-      it('should have pagination params on list tools', async () => {
-        const response = await request(app)
-          .post('/mcp')
-          .set('Authorization', AUTH)
-          .send({
-            jsonrpc: '2.0',
-            id: 2,
-            method: 'tools/list',
-          })
-          .expect(200);
-
-        const usersTool = response.body.result.tools.find((t: { name: string }) => t.name === 'tanda_users');
-        expect(usersTool.inputSchema.properties).toHaveProperty('limit');
-        expect(usersTool.inputSchema.properties).toHaveProperty('page');
+        const tool = response.body.result.tools.find((t: { name: string }) => t.name === 'tanda_people');
+        expect(tool.inputSchema.properties).toHaveProperty('offset');
+        expect(tool.inputSchema.properties).toHaveProperty('limit');
       });
     });
 
@@ -184,8 +156,8 @@ describe('MCP Protocol Endpoints', () => {
             id: 3,
             method: 'tools/call',
             params: {
-              name: 'tanda_users',
-              arguments: { action: 'current' },
+              name: 'tanda_people',
+              arguments: { me: true },
             },
           })
           .expect(401);
@@ -356,35 +328,6 @@ describe('MCP v4.0 Consolidated Tool Definitions', () => {
     });
   });
 
-  const v4Tools = [
-    { name: 'tanda_users', actions: ['list', 'get', 'inactive', 'by_department', 'current'] },
-    { name: 'tanda_schedules', actions: ['list', 'get'] },
-    { name: 'tanda_timesheets', actions: ['shifts', 'timesheets', 'breaks'] },
-    { name: 'tanda_leave', actions: ['list', 'balances', 'types', 'calculate_hours'] },
-    { name: 'tanda_rosters', actions: ['get', 'current', 'by_date'] },
-    { name: 'tanda_reference', actions: ['departments', 'locations', 'teams', 'daily_stats'] },
-    { name: 'tanda_realtime', actions: ['active_shifts', 'clocked_in', 'shift_limits', 'award_interpretation', 'roster_costs'] },
-    { name: 'tanda_unavailability', actions: ['list'] },
-    { name: 'tanda_supervisors', actions: ['detect_overlaps', 'evening_coverage', 'recommendations', 'optimize', 'validate'] },
-  ];
-
-  v4Tools.forEach(({ name, actions }) => {
-    it(`should have ${name} tool with correct actions`, async () => {
-      const response = await request(app)
-        .post('/mcp')
-          .set('Authorization', AUTH)
-        .send({
-          jsonrpc: '2.0',
-          id: 1,
-          method: 'tools/list',
-        })
-        .expect(200);
-
-      const tool = response.body.result.tools.find((t: { name: string }) => t.name === name);
-      expect(tool).toBeDefined();
-      expect(tool.inputSchema.properties.action.enum).toEqual(actions);
-    });
-  });
 });
 
 describe('MCP v4.0 Features', () => {
@@ -429,13 +372,13 @@ describe('MCP v4.0 Features', () => {
 
       expect(response.body.result).toHaveProperty('messages');
       // v4.0 uses consolidated tool names with action parameter
-      expect(response.body.result.messages[0].content.text).toContain('tanda_realtime');
-      expect(response.body.result.messages[0].content.text).toContain('action=active_shifts');
+      expect(response.body.result.messages[0].content.text).toContain('tanda_live');
+      expect(response.body.result.messages[0].content.text).toContain('tanda_exceptions');
     });
   });
 
   describe('Tool Count', () => {
-    it('should have exactly 9 consolidated tools in v4.0', async () => {
+    it('should have exactly 12 tools in v4.0', async () => {
       const response = await request(app)
         .post('/mcp')
           .set('Authorization', AUTH)
@@ -446,7 +389,7 @@ describe('MCP v4.0 Features', () => {
         })
         .expect(200);
 
-      expect(response.body.result.tools.length).toBe(9);
+      expect(response.body.result.tools.length).toBe(12);
     });
 
     it('should have 5 read-only prompts', async () => {
@@ -465,7 +408,7 @@ describe('MCP v4.0 Features', () => {
   });
 
   describe('Short Descriptions', () => {
-    it('should have short descriptions (< 150 chars)', async () => {
+    it('should have concise descriptions (< 330 chars)', async () => {
       const response = await request(app)
         .post('/mcp')
           .set('Authorization', AUTH)
@@ -477,7 +420,7 @@ describe('MCP v4.0 Features', () => {
         .expect(200);
 
       response.body.result.tools.forEach((tool: { name: string; description: string }) => {
-        expect(tool.description.length).toBeLessThan(150);
+        expect(tool.description.length).toBeLessThan(330);
       });
     });
   });

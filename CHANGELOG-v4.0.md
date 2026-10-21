@@ -1,110 +1,31 @@
-# Tanda MCP Server v4.0.0 - Context Window Optimization
+# v4.0.0: Secure, read-only, 12 tools
 
-**Deployed:** 2026-03-02  
-**Goal:** Fix context window explosion for Claude.ai users
+## Phase 0: Security
+- Every MCP route (`POST /mcp`, `GET /mcp`, `POST /`, other `/mcp` verbs, `/stats`) requires an OAuth JWT or `MCP_SHARED_SECRET`. Every JSON-RPC method is covered, including `initialize`, `tools/list` and `tools/call`; unauthenticated calls return `401`.
+- Tanda scopes come from `TANDA_SCOPES`. The default is the least-privilege set (`me roster timesheet department user cost leave unavailability`), and `financial`/`personal` are always stripped.
+- Read-only: the Tanda client rejects any non-GET verb, and write actions and the onboarding prompt are removed.
 
-## Summary
+## Phase 1: Correctness and privacy
+- Daily stats `actual_hours` was about 1000x too low because unix seconds were treated as milliseconds. Fixed, and breaks are now subtracted.
+- Staff by department now filters on `department.staff`.
+- Timesheets: one call per pay period, de-duplicated by id. Timesheets with no shifts and $0 cost are dropped unless `include_empty=true`.
+- User field whitelist plus recursive redaction of `date_of_birth`, `passcode`, `phone`, `email` and `legal_*`.
+- Response guard: summary plus at most 50 rows, a hard 25 KB cap, `truncated` and offset paging.
+- `*_iso` times in America/New_York and decimal `hours`.
+- Ranges are split into 7-day calls, so Tanda's 7-day error is never shown.
 
-Consolidated 44 individual tools into 9 grouped tools with action parameters, reducing context window usage by ~80%.
+## Phase 2: 12 tools
+- New tools: `tanda_org`, `tanda_people`, `tanda_schedules`, `tanda_timesheets`, `tanda_live`, `tanda_time_off`, `tanda_labor_summary`, `tanda_coverage`, `tanda_validate_schedule`, `tanda_exceptions`, `tanda_export_preview`, `tanda_change_history`.
+- The old v3 names and the interim action-based names are aliases for one release; each use is logged and counted in `/stats`.
+- `tanda_get_shift_limits` is deleted. The supervisor optimizer module is replaced by `tanda_coverage` and `tanda_validate_schedule`.
+- Cross-cutting:
+  - ETag/If-None-Match cache, with a 24h fresh window for org data
+  - `updated_after` on list tools
+  - client-side limit of 80 requests/min
+  - actionable errors with no upstream stack traces
+  - compact JSON output
+- `npm run smoke` calls all 12 tools and prints shape and size only.
 
-## Tool Consolidation (44 → 9)
-
-| New Tool | Actions | Replaces |
-|----------|---------|----------|
-| `tanda_users` | list, get, inactive, onboard, invite, by_department, current | 7 user tools |
-| `tanda_schedules` | list, get, create, update, delete, publish | 5 schedule tools |
-| `tanda_timesheets` | shifts, timesheets, approve_shift, approve_timesheet, breaks | 5 timesheet tools |
-| `tanda_leave` | list, create, approve, decline, delete, balances, types, calculate_hours | 8 leave tools |
-| `tanda_rosters` | get, current, by_date | 3 roster tools |
-| `tanda_reference` | departments, locations, teams, daily_stats | 4 reference tools |
-| `tanda_realtime` | active_shifts, clocked_in, shift_limits, award_interpretation, roster_costs | 5 real-time tools |
-| `tanda_unavailability` | list, create, delete | 3 unavailability tools |
-| `tanda_supervisors` | detect_overlaps, evening_coverage, recommendations, optimize, validate, create_optimized | 6 supervisor tools |
-
-## New Features
-
-### Response Pagination
-All list operations now support:
-```json
-{
-  "limit": 50,   // Max records (default 50, max 200)
-  "page": 1     // Page number
-}
-```
-
-Response includes pagination metadata:
-```json
-{
-  "data": [...],
-  "pagination": {
-    "page": 1,
-    "limit": 50,
-    "total": 150,
-    "hasMore": true
-  }
-}
-```
-
-### Date Range Validation
-Maximum 14-day range enforced on all date-based queries:
-```json
-// Returns error:
-{ "from": "2026-01-01", "to": "2026-02-01" }
-// Error: "Max 14-day range per query. Split into smaller chunks."
-```
-
-### MCP_LITE_MODE
-New environment variable for simple use cases. When `MCP_LITE_MODE=true`, only 6 essential tools are exposed:
-- tanda_users
-- tanda_schedules
-- tanda_reference
-- tanda_timesheets
-- tanda_leave
-- tanda_realtime
-
-### Shortened Descriptions
-All tool descriptions now < 150 characters for reduced context usage.
-
-## Migration Guide
-
-### Before (v3.x)
-```javascript
-// Old: 44 separate tools
-tanda_get_users({ active: true })
-tanda_get_user({ user_id: 123 })
-tanda_get_inactive_users()
-tanda_onboard_users({ users: [...] })
-```
-
-### After (v4.0)
-```javascript
-// New: 1 tool with action parameter
-tanda_users({ action: "list", active: true })
-tanda_users({ action: "get", user_id: 123 })
-tanda_users({ action: "inactive" })
-tanda_users({ action: "onboard", users: [...] })
-```
-
-## Deployment
-
-- **Repository:** https://github.com/hakeemrabiuDFW/Tanda-Workforce-MCP-Server
-- **Railway:** Auto-deploys on push to main
-- **Health Check:** GET /health
-
-## Test Results
-
-| Test | Status |
-|------|--------|
-| Build (tsc) | ✅ Pass |
-| Initialize endpoint | ✅ Pass |
-| Tool definitions | ✅ Correct |
-| Prompts updated | ✅ v4.0 tool names |
-| Integration tests | ⚠️ Require auth (expected) |
-
-## Files Changed
-
-- `src/mcp/tools.ts` - Consolidated tool definitions + execution handlers
-- `src/mcp/handler.ts` - Updated prompts with v4.0 tool references
-- `src/config/environment.ts` - Added MCP_LITE_MODE, updated version to 4.0.0
-- `package.json` - Version bump to 4.0.0
-- `tests/mcp.test.ts` - Updated for v4.0 tool structure
+## Breaking
+- Tool names and response shapes changed (the aliases cover one release).
+- `MCP_READ_ONLY_MODE` and `MCP_LITE_MODE` have no effect; the server is always read-only.

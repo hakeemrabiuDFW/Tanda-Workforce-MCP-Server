@@ -17,7 +17,7 @@ describe('MCP route authentication', () => {
     it.each(methods)('rejects unauthenticated %s with 401', async (method) => {
       const response = await request(app)
         .post(path)
-        .send({ jsonrpc: '2.0', id: 1, method, params: { name: 'tanda_users', arguments: { action: 'current' } } })
+        .send({ jsonrpc: '2.0', id: 1, method, params: { name: 'tanda_people', arguments: { me: true } } })
         .expect(401);
 
       expect(response.body.error).toBe('unauthorized');
@@ -31,7 +31,7 @@ describe('MCP route authentication', () => {
           jsonrpc: '2.0',
           id: 1,
           method: 'tools/call',
-          params: { name: 'tanda_users', arguments: { action: 'list' } },
+          params: { name: 'tanda_people', arguments: {} },
         })
         .expect(401);
 
@@ -108,6 +108,9 @@ describe('Read-only Tanda client', () => {
     // eslint-disable-next-line @typescript-eslint/no-var-requires
     const { TandaClient } = require('../src/tanda/client');
     const client = new TandaClient('token');
-    await expect(client.createSchedule({ start: 'a', finish: 'b' })).rejects.toThrow(/Read-only/);
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const axiosInstance = (client as any).client;
+    await expect(axiosInstance.post('/schedules', {})).rejects.toThrow(/Read-only/);
+    await expect(axiosInstance.delete('/schedules/1')).rejects.toThrow(/Read-only/);
   });
 });
