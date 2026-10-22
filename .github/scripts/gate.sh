@@ -24,7 +24,7 @@ if [ -z "$pr" ]; then
   exit 0
 fi
 
-pr_json=$(gh pr view "$pr" --repo "$REPO" --json author,isDraft)
+pr_json=$(gh pr view "$pr" --repo "$REPO" --json author,isDraft,body)
 if [ "$(jq -r .isDraft <<<"$pr_json")" = true ]; then
   echo "gate: PR #$pr is a draft; nothing to do"
   exit 0
@@ -73,6 +73,14 @@ for reviewer in standards spec; do
   upsert_comment "$reviewer" "$tmp/$reviewer.md"
   [ "$blocking" -eq 0 ] || reasons+=("$reviewer reviewer: $blocking blocking finding(s)")
 done
+
+# The PR body must follow the mattpocock-skills:pr template.
+missing=()
+for heading in '## Summary' '## Evidence' '## Merge Danger' '**Door:**' '**Blast Radius:**'; do
+  jq -e --arg h "$heading" '.body // "" | contains($h)' <<<"$pr_json" >/dev/null || missing+=("\`$heading\`")
+done
+[ "${#missing[@]}" -eq 0 ] ||
+  reasons+=("PR body is missing PR template parts: ${missing[*]}")
 
 rank() { case "$1" in low) echo 1 ;; medium) echo 2 ;; *) echo 3 ;; esac; }
 [ "$(rank "$risk")" -le "$(rank "$AUTO_MERGE_MAX_RISK")" ] ||

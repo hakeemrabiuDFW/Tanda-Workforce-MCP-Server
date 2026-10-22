@@ -13,9 +13,10 @@ concurrency:
   cancel-in-progress: true
 
 env:
-  # THE SWITCH. "false": dry run, the gate only comments "would auto-merge".
-  # "true": it squash-merges and deletes the branch.
-  AUTO_MERGE: "false"
+  # THE SWITCH. "true": the gate squash-merges and deletes the branch.
+  # "false": dry run, it only comments "would auto-merge". Turning it off is
+  # a .github/ change, so that PR is risk:high and you merge it by hand.
+  AUTO_MERGE: "true"
   # Highest risk the gate may merge: "low" or "medium". risk:high never auto-merges.
   AUTO_MERGE_MAX_RISK: "low"
   # Only this author's PRs can be auto-merged.
