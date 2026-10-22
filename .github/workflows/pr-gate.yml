@@ -1,0 +1,61 @@
+name: pr-gate
+# Runs when pr-pipeline.yml finishes. GitHub always runs this file, and the
+# scripts it checks out, from main, so a PR cannot loosen the rules it is
+# judged by. See .github/scripts/gate.sh for the decision.
+
+on:
+  workflow_run:
+    workflows: [pr-pipeline]
+    types: [completed]
+
+concurrency:
+  group: pr-gate-${{ github.event.workflow_run.head_repository.full_name }}-${{ github.event.workflow_run.head_branch }}
+  cancel-in-progress: true
+
+env:
+  # THE SWITCH. "false": dry run, the gate only comments "would auto-merge".
+  # "true": it squash-merges and deletes the branch.
+  AUTO_MERGE: "false"
+  # Highest risk the gate may merge: "low" or "medium". risk:high never auto-merges.
+  AUTO_MERGE_MAX_RISK: "low"
+  # Only this author's PRs can be auto-merged.
+  OWNER_LOGIN: hakeemrabiuDFW
+
+permissions: {}
+
+jobs:
+  gate:
+    if: >-
+      github.event.workflow_run.event == 'pull_request' &&
+      github.event.workflow_run.conclusion != 'cancelled'
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    permissions:
+      actions: read # download the reviewers' verdict artifacts
+      contents: write # merge and delete the branch (used only when AUTO_MERGE is "true")
+      issues: write # labels and comments
+      pull-requests: write # merge
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ github.event.repository.default_branch }}
+          persist-credentials: false
+
+      - name: Download verdicts
+        env:
+          GH_TOKEN: ${{ github.token }}
+          RUN_ID: ${{ github.event.workflow_run.id }}
+        # No artifacts when the reviewers were skipped or failed; the gate reports that.
+        run: |
+          gh run download "$RUN_ID" --repo "$GITHUB_REPOSITORY" --pattern 'verdict-*' \
+            --dir "$RUNNER_TEMP/verdicts" || echo "No verdict artifacts"
+
+      - name: Gate
+        env:
+          GH_TOKEN: ${{ github.token }}
+          REPO: ${{ github.repository }}
+          HEAD_SHA: ${{ github.event.workflow_run.head_sha }}
+          RUN_CONCLUSION: ${{ github.event.workflow_run.conclusion }}
+          RUN_URL: ${{ github.event.workflow_run.html_url }}
+          VERDICT_DIR: ${{ runner.temp }}/verdicts
+        run: .github/scripts/gate.sh

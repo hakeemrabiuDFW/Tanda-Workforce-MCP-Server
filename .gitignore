@@ -42,3 +42,6 @@ coverage/
 .eslintcache
 # Local MCP config with auth tokens
 .mcp.local.json
+
+# Claude reviewer context (CI)
+.review/

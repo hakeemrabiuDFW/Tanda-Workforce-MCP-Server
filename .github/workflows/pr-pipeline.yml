@@ -1,0 +1,82 @@
+name: pr-pipeline
+# Every PR: mechanical checks plus two Claude reviewers (Standards, Spec).
+# The reviewers only read; they hand a JSON verdict to pr-gate.yml as an
+# artifact, and pr-gate.yml (which runs from main) comments, labels and merges.
+# Claude runs only on the owner's own same-repo PRs: fork PRs get checks only
+# and never see the token.
+
+on:
+  pull_request:
+    types: [opened, synchronize, reopened, ready_for_review]
+
+concurrency:
+  group: pr-pipeline-${{ github.event.pull_request.number }}
+  cancel-in-progress: true
+
+permissions: {}
+
+jobs:
+  checks:
+    uses: ./.github/workflows/checks.yml
+    permissions:
+      contents: read
+
+  review:
+    if: >-
+      github.event.pull_request.user.login == 'hakeemrabiuDFW' &&
+      github.event.pull_request.head.repo.full_name == github.repository &&
+      !github.event.pull_request.draft
+    strategy:
+      fail-fast: false
+      matrix:
+        reviewer: [standards, spec]
+    name: review (${{ matrix.reviewer }})
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    permissions:
+      contents: read
+      pull-requests: read
+      issues: read
+    env:
+      REVIEWER: ${{ matrix.reviewer }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+
+      - name: Gather PR context into .review/
+        env:
+          GH_TOKEN: ${{ github.token }}
+          PR: ${{ github.event.pull_request.number }}
+          BASE_SHA: ${{ github.event.pull_request.base.sha }}
+        run: .github/scripts/review-context.sh
+
+      - name: Claude review
+        id: claude
+        uses: anthropics/claude-code-action@6fed3ca145920b639991cb756090506e1bcaf515 # v1.0.245
+        with:
+          claude_code_oauth_token: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
+          github_token: ${{ github.token }}
+          prompt: |
+            You are the ${{ matrix.reviewer }} reviewer for pull request #${{ github.event.pull_request.number }}.
+            Read .github/prompts/${{ matrix.reviewer }}.md and follow it exactly.
+            The PR's context is in .review/. Do not change any files.
+          claude_args: >-
+            --max-turns 25
+            --allowedTools "Read,Grep,Glob"
+            --json-schema '{"type":"object","additionalProperties":false,"required":["summary","findings"],"properties":{"summary":{"type":"string"},"findings":{"type":"array","items":{"type":"object","additionalProperties":false,"required":["severity","title","detail"],"properties":{"severity":{"type":"string","enum":["blocking","non-blocking"]},"file":{"type":"string"},"line":{"type":"integer"},"title":{"type":"string"},"detail":{"type":"string"}}}}}}'
+
+      - name: Save verdict
+        env:
+          OUTPUT: ${{ steps.claude.outputs.structured_output }}
+        run: |
+          mkdir -p verdict
+          printf '%s' "$OUTPUT" | jq -e --arg r "$REVIEWER" '{reviewer: $r, summary, findings}' > verdict/verdict.json
+          .github/scripts/render-review.sh verdict/verdict.json >> "$GITHUB_STEP_SUMMARY"
+
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: verdict-${{ matrix.reviewer }}
+          path: verdict/verdict.json
+          retention-days: 7
