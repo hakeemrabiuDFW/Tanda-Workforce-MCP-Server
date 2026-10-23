@@ -140,10 +140,13 @@ export function weekStartOn(date: string, startDay: number): string {
   return addDays(date, -((day - startDay + 7) % 7));
 }
 
-/** Parse a weekday name ("MON", "monday", "Sun") to 0-6, or null. */
+const WEEKDAY_NAMES = ['SUNDAY', 'MONDAY', 'TUESDAY', 'WEDNESDAY', 'THURSDAY', 'FRIDAY', 'SATURDAY'];
+
+/** Parse a weekday ("MON", "monday", "Sun") to 0-6, or null. Only 3-letter or full names count. */
 export function parseWeekday(value: unknown): number | null {
   if (typeof value !== 'string') return null;
-  const i = WEEKDAYS.indexOf(value.trim().slice(0, 3).toUpperCase() as Weekday);
+  const v = value.trim().toUpperCase();
+  const i = v.length === 3 ? WEEKDAYS.indexOf(v as Weekday) : WEEKDAY_NAMES.indexOf(v);
   return i >= 0 ? i : null;
 }
 

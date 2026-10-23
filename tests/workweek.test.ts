@@ -1,7 +1,7 @@
 /** WFM-005 (#52): weekly hours use explicit calendar workweeks. "Today" is pinned to Friday 2026-10-23. */
 import { executeTool } from '../src/mcp/tools';
 import { fakeTanda, nySeconds } from './helpers/fakeTanda';
-import { weekStartOn } from '../src/utils/time';
+import { parseWeekday, weekStartOn } from '../src/utils/time';
 
 type Content = { summary: Record<string, unknown>; rows: Array<Record<string, unknown>> };
 
@@ -62,7 +62,7 @@ describe('WFM-005 weekly hours use explicit calendar workweeks', () => {
 
   it('WORKWEEK_START changes the week boundaries', async () => {
     const res = await run(routes().client, 'tanda_exceptions', { from: '2026-10-16', to: '2026-10-22', checks: ['weekly_hours_over_40'], workweek_start: 'THU' });
-    expect(res.content.summary.week_basis).toBe('calendar workweek THU-WED (WORKWEEK_START=THU)');
+    expect(res.content.summary.week_basis).toBe('calendar workweek THU-WED (workweek_start=THU)');
     expect(res.content.rows.find((r) => r.user_id === 1)).toMatchObject({ week_start: '2026-10-15', week_end: '2026-10-21', hours: 45 });
   });
 
@@ -86,5 +86,12 @@ describe('workweek helper', () => {
     expect(weekStartOn('2026-10-23', 0)).toBe('2026-10-18');
     expect(weekStartOn('2026-10-23', 5)).toBe('2026-10-23');
     expect(weekStartOn('2026-10-22', 5)).toBe('2026-10-16');
+  });
+});
+
+describe('parseWeekday', () => {
+  it('accepts 3-letter and full names only', () => {
+    expect([parseWeekday('mon'), parseWeekday('Thursday'), parseWeekday('SUN')]).toEqual([1, 4, 0]);
+    expect([parseWeekday('Sunrise'), parseWeekday('Thurs'), parseWeekday('')]).toEqual([null, null, null]);
   });
 });

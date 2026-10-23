@@ -19,7 +19,7 @@ export interface Workweek {
   startDay: number;
   start(date: string): string;
   end(date: string): string;
-  /** e.g. "calendar workweek MON-SUN (WORKWEEK_START=MON)" */
+  /** e.g. "calendar workweek MON-SUN (WORKWEEK_START=MON)"; names the argument when one overrides the env */
   basis: string;
 }
 
@@ -31,6 +31,6 @@ export function workweek(arg?: unknown): Workweek {
     startDay,
     start: (date) => weekStartOn(date, startDay),
     end: (date) => addDays(weekStartOn(date, startDay), 6),
-    basis: `calendar workweek ${first}-${last} (WORKWEEK_START=${first})`,
+    basis: `calendar workweek ${first}-${last} (${arg !== undefined && arg !== null && arg !== '' ? 'workweek_start' : 'WORKWEEK_START'}=${first})`,
   };
 }
