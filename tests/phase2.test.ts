@@ -262,6 +262,21 @@ describe('tanda_validate_schedule', () => {
     expect(issues[3]).toMatch(/zero-length/);
     expect(requests.every((r) => r.method === 'GET')).toBe(true);
   });
+
+  it('still validates when the connection lacks the unavailability scope', async () => {
+    const day = '2026-10-13';
+    const { client } = fakeTanda([
+      ['/users', () => [{ id: 1, name: 'A' }]],
+      ['/schedules', () => [{ id: 50, user_id: 1, start: nySeconds(day, '08:00'), finish: nySeconds(day, '12:00') }]],
+      ['/leave', () => []],
+      ['/unavailability', () => ({ __status: 403, body: { error: 'insufficient scope' } })],
+    ]);
+    const res = (await executeTool(client, 'tanda_validate_schedule', {
+      shifts: [{ user_id: 1, start: `${day} 10:00`, finish: `${day} 14:00` }],
+    })).content as Content;
+    expect([...(res.rows[0].errors as string[]), ...(res.rows[0].warnings as string[])].join('; ')).toMatch(/overlaps existing schedule 50/);
+    expect(res.summary.note).toMatch(/Unavailability was not checked/);
+  });
 });
 
 describe('deprecated aliases', () => {

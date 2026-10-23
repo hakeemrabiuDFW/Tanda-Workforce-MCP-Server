@@ -1,4 +1,4 @@
-# Tanda Workforce MCP Server v4.0.0
+# Tanda Workforce MCP Server v4.0.1
 
 A **read-only** MCP (Model Context Protocol) server for the Tanda / Workforce.com API. It exposes 12 consolidated tools. Every tool is privacy-filtered and returns at most 25 KB, so assistants like Claude can answer workforce questions without overflowing their context.
 
@@ -6,7 +6,7 @@ A **read-only** MCP (Model Context Protocol) server for the Tanda / Workforce.co
 
 - **Auth on every MCP route.** `POST /mcp`, `GET /mcp` and `POST /` require an OAuth JWT or `Authorization: Bearer <MCP_SHARED_SECRET>`. Unauthenticated calls get `401`.
 - **Read-only.** The Tanda client refuses any non-GET request.
-- **Least-privilege scopes.** The server requests `me roster timesheet department user cost leave unavailability`. It never requests `financial` or `personal`.
+- **Least-privilege scopes.** The server requests `me roster timesheet department user cost leave`. It never requests `financial` or `personal`. `unavailability` is off by default because Workforce.com's OAuth fails when it is requested; add it to `TANDA_SCOPES` only if your OAuth app supports it.
 - **Privacy by default.** User records are whitelisted, and `date_of_birth`, `passcode`, `phone`, `email` and `legal_*` are returned only when the `fields` parameter names them.
 
 See [docs/SECURITY.md](docs/SECURITY.md).
@@ -55,7 +55,7 @@ npm run build && npm start
 | `TANDA_CLIENT_ID`, `TANDA_CLIENT_SECRET` | yes | Tanda OAuth app |
 | `TANDA_REDIRECT_URI` | prod | OAuth callback (auto-detected on Railway) |
 | `SESSION_SECRET`, `JWT_SECRET` | yes | ≥ 32 chars |
-| `TANDA_SCOPES` | no | Default `me roster timesheet department user cost leave unavailability` |
+| `TANDA_SCOPES` | no | Default `me roster timesheet department user cost leave` |
 | `MCP_SHARED_SECRET` + `TANDA_ACCESS_TOKEN` | no | Bearer-secret auth for server-to-server, Claude Desktop and the smoke test |
 | `TANDA_EXPORT_FORMAT` | for export preview | Payroll export format name |
 | `TANDA_TIMEZONE` | no | Default `America/New_York` |
@@ -89,6 +89,17 @@ MCP_URL=https://your-domain.com/mcp MCP_TOKEN=<secret> npm run smoke [from] [to]
 ```
 
 `npm run smoke` calls all 12 tools against a running server and prints only the shape and size of each response (no row values). It exits non-zero if a tool errors, exceeds 25 KB, or returns `date_of_birth`/`passcode`.
+
+## Releasing
+
+Changes reach production through `staging` first:
+
+1. Open a pull request into `staging`. CI runs typecheck, tests and build.
+2. Merge it. **Build and deploy** (`.github/workflows/deploy.yml`) tests again, pushes the image as `:staging` and `:<commit>`, redeploys the `tanda-mcp-stage` Railway service, and waits until its `/health` reports the new commit.
+3. Check staging (`https://tanda-mcp-stage-production.up.railway.app`), for example with `npm run smoke`.
+4. Open a pull request from `staging` into `main` and merge it. The same workflow ships `:production` to the production service.
+
+The deploy step needs a Railway project token as the `RAILWAY_TOKEN` repository secret; without it the image is pushed but not deployed. To require approval for production, add reviewers to the `production` environment in the repository's settings. To roll back, redeploy an earlier deployment in Railway, or point the service at an earlier `:<commit>` image.
 
 ## Project Structure
 

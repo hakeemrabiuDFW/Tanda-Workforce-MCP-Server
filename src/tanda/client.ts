@@ -30,6 +30,12 @@ export interface TandaClientOptions {
   adapter?: AxiosAdapter;
   /** Skip the shared rate limiter (tests only). */
   disableRateLimit?: boolean;
+  /**
+   * Session-level refresher. Tanda refresh tokens are single-use, so when a session owns
+   * the tokens a 401 asks it for a new access token (it serializes and saves the rotation)
+   * instead of this client spending its own copy of the refresh token.
+   */
+  refresh?: (failedAccessToken: string) => Promise<string>;
 }
 
 export interface GetOptions {
@@ -101,17 +107,15 @@ export class TandaClient {
   }
 
   private async refreshAccessToken(): Promise<void> {
+    if (this.options.refresh) {
+      this.accessToken = await this.options.refresh(this.accessToken);
+      return;
+    }
     if (!this.refreshToken) throw new TandaApiError('No refresh token available', 401);
-    const response = await axios.post<TandaTokenResponse>(config.TANDA_TOKEN_URL, {
-      grant_type: 'refresh_token',
-      client_id: config.TANDA_CLIENT_ID,
-      client_secret: config.TANDA_CLIENT_SECRET,
-      refresh_token: this.refreshToken,
-    });
-    this.accessToken = response.data.access_token;
-    this.refreshToken = response.data.refresh_token;
-    this.tokenExpiresAt = Date.now() + response.data.expires_in * 1000;
-    logger.info('Tanda access token refreshed successfully');
+    const tokens = await refreshTandaToken(this.refreshToken);
+    this.accessToken = tokens.access_token;
+    this.refreshToken = tokens.refresh_token;
+    this.tokenExpiresAt = Date.now() + tokens.expires_in * 1000;
   }
 
   /** Map an upstream failure to an actionable error. Upstream stacks/bodies are only logged. */
@@ -175,7 +179,7 @@ export class TandaClient {
         return response.data as T;
       } catch (error) {
         const status = (error as AxiosError).response?.status;
-        if (status === 401 && this.refreshToken && attempt === 0) {
+        if (status === 401 && (this.refreshToken || this.options.refresh) && attempt === 0) {
           attempt++;
           try {
             await this.refreshAccessToken();
@@ -451,6 +455,19 @@ export async function exchangeCodeForToken(code: string): Promise<TandaTokenResp
     code,
   });
   logger.info('Successfully exchanged authorization code for tokens');
+  return response.data;
+}
+
+/** Spend a (single-use) Tanda refresh token for a new access + refresh token pair. */
+export async function refreshTandaToken(refreshToken: string): Promise<TandaTokenResponse> {
+  const response = await axios.post<TandaTokenResponse>(config.TANDA_TOKEN_URL, {
+    grant_type: 'refresh_token',
+    client_id: config.TANDA_CLIENT_ID,
+    client_secret: config.TANDA_CLIENT_SECRET,
+    refresh_token: refreshToken,
+    redirect_uri: config.TANDA_REDIRECT_URI,
+  });
+  logger.info('Tanda access token refreshed');
   return response.data;
 }
 

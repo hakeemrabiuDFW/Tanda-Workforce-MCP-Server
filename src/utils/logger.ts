@@ -41,6 +41,24 @@ export const logger = winston.createLogger({
   ],
 });
 
+/**
+ * Describe an error for the log without its request. Axios errors carry the request's
+ * headers and body (a user's bearer token, or the client secret on a token exchange),
+ * so only the HTTP status and the API's error fields are kept.
+ */
+export function describeError(error: unknown): string {
+  const ax = error as { isAxiosError?: boolean; response?: { status?: number; data?: unknown } };
+  if (ax?.isAxiosError) {
+    const data = (ax.response?.data ?? {}) as { error?: unknown; error_description?: unknown };
+    const parts = [`HTTP ${ax.response?.status ?? 'network error'}`];
+    if (typeof data.error === 'string') parts.push(data.error);
+    if (typeof data.error_description === 'string') parts.push(data.error_description);
+    return parts.join(' ');
+  }
+  if (error instanceof Error) return error.stack || error.message;
+  return 'Unknown error';
+}
+
 // Stream for morgan HTTP logging
 export const httpLogStream = {
   write: (message: string) => {

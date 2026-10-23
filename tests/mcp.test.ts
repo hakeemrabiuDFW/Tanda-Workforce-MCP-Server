@@ -56,7 +56,7 @@ describe('MCP Protocol Endpoints', () => {
 
         expect(response.body.result.serverInfo).toHaveProperty('name');
         expect(response.body.result.serverInfo).toHaveProperty('version');
-        expect(response.body.result.serverInfo.version).toBe('4.0.0');
+        expect(response.body.result.serverInfo.version).toBe('4.0.1');
       });
 
       it('should return capabilities in initialize response', async () => {

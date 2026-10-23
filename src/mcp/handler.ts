@@ -1,6 +1,6 @@
 import { Request, Response } from 'express';
 import { config } from '../config/environment';
-import { logger } from '../utils/logger';
+import { logger, describeError } from '../utils/logger';
 import { executeTool, getAvailableTools, finalizeContent, isKnownTool } from './tools';
 import { TandaApiError } from '../tanda/client';
 import { pickUserFields } from './privacy';
@@ -84,7 +84,7 @@ export class MCPHandler {
           );
       }
     } catch (error) {
-      logger.error('MCP request failed:', error);
+      logger.error(`MCP request failed: ${describeError(error)}`);
       return this.createErrorResponse(
         request.id,
         MCP_ERROR_CODES.INTERNAL_ERROR,
