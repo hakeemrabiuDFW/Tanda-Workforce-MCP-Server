@@ -351,6 +351,29 @@ export class TandaClient {
   }
 
   /**
+   * Every timesheet in the pay periods that contain `asOf` or ended in the `lookbackDays` before it,
+   * walking back one pay period per call (raw timesheets, all shifts kept, de-duplicated by id).
+   */
+  async getOpenPeriodTimesheets(filter: { asOf: string; lookbackDays: number; maxCalls?: number }): Promise<Rec[]> {
+    const earliest = addDays(filter.asOf, -filter.lookbackDays);
+    const byId = new Map<unknown, Rec>();
+    let date = filter.asOf;
+    let calls = 0;
+    while (date >= earliest && calls++ < (filter.maxCalls ?? 12)) {
+      const sheets = await this.getList(`/timesheets/on/${date}`, { show_costs: 'true' });
+      let periodStart: string | null = null;
+      for (const ts of sheets) {
+        if (!byId.has(ts.id)) byId.set(ts.id, ts);
+        const start = typeof ts.start === 'string' ? ts.start.slice(0, 10) : null;
+        if (start && /^\d{4}-\d{2}-\d{2}$/.test(start) && (!periodStart || start < periodStart)) periodStart = start;
+      }
+      // Step to the day before the earliest period start; without one, step back a week.
+      date = periodStart && periodStart <= date ? addDays(periodStart, -1) : addDays(date, -7);
+    }
+    return [...byId.values()];
+  }
+
+  /**
    * Payroll export preview. skip_status_update is ALWAYS true so previewing never marks
    * timesheets as exported; approved_only is always true.
    */
