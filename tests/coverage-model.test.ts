@@ -85,5 +85,12 @@ describe('WFM-006 coverage suggestions and supervision model', () => {
     const none = await run(routes(staffAll, () => ({ __status: 403, body: {} })).client, 'tanda_coverage', { from: d, to: d });
     expect((none.content.suggestions || []).every((s) => s.action === 'unfilled')).toBe(true);
   });
-});
 
+  it('does not claim availability was unconfirmed when there were no gaps to fill', async () => {
+    const covered = [sched(1, 1, 11, '17:00', 5), sched(4, 100, 12, '17:00', 5)];
+    const res = await run(routes(covered, () => ({ __status: 403, body: {} })).client, 'tanda_coverage', { from: d, to: d });
+    expect(res.content.summary.gaps).toBe(0);
+    expect(res.content.warnings).toBeUndefined();
+    expect(res.content.assumptions!.join(' ')).not.toMatch(/could not be confirmed/);
+  });
+});

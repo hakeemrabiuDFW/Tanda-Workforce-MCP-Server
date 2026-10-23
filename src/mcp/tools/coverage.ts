@@ -296,7 +296,7 @@ export function suggest(data: CoverageData, gaps: Gap[], overlapsList: Overlap[]
 }
 
 /** Plain-language statement of how the gaps were computed, returned with every response. */
-export function assumptions(data: CoverageData, model: SupervisionModel, sitesPerSupervisor: number): string[] {
+export function assumptions(data: CoverageData, model: SupervisionModel, sitesPerSupervisor: number, warnings: Warning[] = []): string[] {
   const out = [
     model === 'site'
       ? 'Supervision model "site": every site with staff on shift needs a Supervisor-department shift at that same site.'
@@ -308,7 +308,8 @@ export function assumptions(data: CoverageData, model: SupervisionModel, sitesPe
       : 'COVERAGE_EXCLUDE_USER_IDS is not set, so no users are excluded from supervisor coverage.',
     'Suggestions only name users with the "employee" level who are rostered that day or confirmed available (no leave or unavailability).',
   ];
-  if (data.leave === null || data.unavailability === null) {
+  // Only when a lookup was attempted and failed; with no gaps nothing is fetched
+  if (warnings.some((w) => w.check.startsWith('suggestions.'))) {
     out.push('Availability could not be confirmed (see warnings), so only supervisors already rostered that day are suggested.');
   }
   return out;
@@ -400,7 +401,7 @@ export const coverageTool: Tool = {
         double_booked: overlapsList.filter((o) => o.type === 'double_booked').length,
       },
       rows,
-      { offset: args.offset, pageSize: args.limit, extra: { assumptions: assumptions(data, model, perSup), suggestions, ...withWarnings(warnings) } }
+      { offset: args.offset, pageSize: args.limit, extra: { assumptions: assumptions(data, model, perSup, warnings), suggestions, ...withWarnings(warnings) } }
     );
   },
 };
