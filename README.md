@@ -24,7 +24,7 @@ Every list tool returns `{ summary, rows, page }`. `rows` holds at most 50 entri
 | `tanda_live` | Who is clocked in now (`/shifts/active`), with name, site and elapsed hours. Flags shifts open more than 12h. |
 | `tanda_time_off` | `kind=leave`, `unavailability` or `balances`. Balances include leave types and say which case applies: `no_accrual_configured` (`balances_configured: false`, with a hint), `zero_balance` or `has_balance`. |
 | `tanda_labor_summary` | Scheduled vs actual hours and cost, with variance, grouped by `location`, `day`, `department` or `user`. |
-| `tanda_coverage` | Supervisor coverage **by location**. `mode=gaps` lists times staff are on site with no supervisor; `mode=overlaps` lists two supervisors at one site or one supervisor double-booked. Includes up to 10 suggested moves. Optional `window_start`/`window_end` (e.g. 17:00–22:00). |
+| `tanda_coverage` | Supervisor coverage. `mode=gaps` lists times staff are on site with no supervisor; `mode=overlaps` lists two supervisors at one site or one supervisor double-booked. `supervision_model=site` (default) needs a supervisor at every staffed site; `roving` lets one supervisor on duty cover `sites_per_supervisor` sites. Up to 10 suggested moves, which only name users with the `employee` level who are rostered that day or confirmed available, and never anyone in `COVERAGE_EXCLUDE_USER_IDS`. Returns `assumptions[]`. Optional `window_start`/`window_end` (e.g. 17:00–22:00). |
 | `tanda_validate_schedule` | Checks proposed shifts against rosters, leave, unavailability, the 12h shift limit, the 40h week and double-booking. Each check fails soft: a missing scope skips that check and adds `warnings: [{ check, reason }]` instead of failing the call. Weekly hours use the same calendar workweek as `tanda_exceptions` (`workweek_start`, echoed as `week_basis`). Nothing is written. |
 | `tanda_exceptions` | Audit list: shifts open more than 12h, zero-length shifts, pending leave already in the past, unapproved timesheet $ by site, active staff with no award template, calendar workweeks over 40h, and `projected_over_40` for the current week (worked + still rostered). Weekly checks echo `week_basis` and each week's range. Unapproved cost is reported for the window (`window_unapproved_cost`) and for every pay period that has ended or is current (`all_open_periods_unapproved_cost`, `pending_open_periods`; looks back `OPEN_PERIOD_LOOKBACK_DAYS`, default 42). |
 | `tanda_export_preview` | Payroll export preview with `approved_only=true` and a hard-coded `skip_status_update=true`. Returns row count, totals and rows missing a pay code. Never returns the raw file. |
@@ -59,6 +59,9 @@ npm run build && npm start
 | `MCP_SHARED_SECRET` + `TANDA_ACCESS_TOKEN` | no | Bearer-secret auth for server-to-server, Claude Desktop and the smoke test |
 | `TANDA_EXPORT_FORMAT` | for export preview | Payroll export format name |
 | `TANDA_TIMEZONE` | no | Default `America/New_York` |
+| `COVERAGE_EXCLUDE_USER_IDS` | no | Comma-separated user ids never counted or suggested as supervisors (e.g. bookkeeping and admin-only users) |
+| `COVERAGE_SUPERVISION_MODEL` | no | Default `supervision_model` for `tanda_coverage`: `site` (default) or `roving` |
+| `COVERAGE_ROVING_SITES` | no | Sites one roving supervisor covers at once. Default 5 |
 | `WORKWEEK_START` | no | First day of the overtime workweek (`SUN`…`SAT`). Default `MON` |
 | `OPEN_PERIOD_LOOKBACK_DAYS` | no | How far back `tanda_exceptions` looks for still-pending pay periods. Default 42 |
 | `TANDA_BOOKKEEPING_LOCATION_IDS` | no | Default `281737,301754,396358` |
