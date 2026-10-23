@@ -1,6 +1,6 @@
 import { TandaClient, TandaApiError } from '../../tanda/client';
 import { logger } from '../../utils/logger';
-import { ArgError, Args } from '../args';
+import { ArgError, Args, bool } from '../args';
 import { guardResponse, byteSize, MAX_BYTES } from '../guard';
 import { parseFields, redactSensitive } from '../privacy';
 import { Tool, ToolDefinition } from './types';
@@ -62,7 +62,7 @@ export function isKnownTool(name: string): boolean {
  */
 export function finalizeContent(content: unknown, args: Args): unknown {
   const allow = parseFields(args.fields);
-  if (args.show_wages === true || args.show_wages === 'true') allow.push('hourly_rate');
+  if (bool(args.show_wages)) allow.push('hourly_rate');
   const safe = redactSensitive(content, allow);
   if (byteSize(safe) <= MAX_BYTES) return safe;
   if (Array.isArray(safe)) return guardResponse({ total: safe.length }, safe, { offset: args.offset });

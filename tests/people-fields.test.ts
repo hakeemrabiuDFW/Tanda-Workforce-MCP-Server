@@ -51,3 +51,10 @@ describe('WFM-007 tanda_people reports ignored fields', () => {
   });
 });
 
+
+describe('WFM-007 redaction scope', () => {
+  it('only hourly_rate is a wage key: export columns such as "Wages" survive', async () => {
+    const { redactSensitive } = await import('../src/mcp/privacy');
+    expect(redactSensitive({ Wages: 1, 'Wage Type': 'ORD', wages_cost: 2, hourly_rate: 18 })).toEqual({ Wages: 1, 'Wage Type': 'ORD', wages_cost: 2 });
+  });
+});

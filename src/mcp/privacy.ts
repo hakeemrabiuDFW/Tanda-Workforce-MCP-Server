@@ -16,7 +16,7 @@ export const DEFAULT_USER_FIELDS = [
 ] as const;
 
 /** Keys never returned unless explicitly requested. */
-const SENSITIVE_KEY_RE = /^(date_of_birth|passcode|phone|normalised_phone|email|legal_.*|address|emergency_contact.*|tax_.*|bank_.*|super_.*|hourly_rate|wage.*)$/i;
+const SENSITIVE_KEY_RE = /^(date_of_birth|passcode|phone|normalised_phone|email|legal_.*|address|emergency_contact.*|tax_.*|bank_.*|super_.*|hourly_rate)$/i;
 
 /** Keys never returned, even when requested via `fields`. */
 const POLICY_BLOCKED_RE = /^(passcode|tax_.*|bank_.*|super_.*)$/i;
