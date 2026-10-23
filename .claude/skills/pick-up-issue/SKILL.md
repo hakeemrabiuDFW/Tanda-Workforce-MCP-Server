@@ -32,10 +32,15 @@ branch = one PR. Production only ever receives what passed on staging.
 
 ## 2. PR through the factory
 
-- Open a **ready (non-draft)** PR into `staging`, authored as `hakeemrabiuDFW`, with
-  the body from `.github/pull_request_template.md` filled in (`## Summary` with
-  `Closes #N`, `## Evidence`, `## Merge Danger` with `**Door:**` and
-  `**Blast Radius:**`). The gate rejects a body missing any of them.
+- Open a **ready (non-draft)** PR into `staging`, authored as `hakeemrabiuDFW`.
+  Write the body with the `pr` skill from Matt Pocock's "Skills For Real Engineers"
+  plugin (`.github/pull_request_template.md` has the same headings):
+  - `## Summary`: `Closes #N`, then the smallest visual that shows the change
+    (a diff-sketch, call tree, file tree or Mermaid diagram), with brief prose.
+  - `## Evidence`: **Before** / **After**, e.g. the failing and passing test or the
+    tool output before and after.
+  - `## Merge Danger`: `**Door:**` one-way or two-way, and `**Blast Radius:**`.
+  The gate rejects a body missing any of these headings.
 - `pr-pipeline` runs checks plus the Standards and Spec Claude reviewers;
   `pr-gate` labels `risk:*`, posts the reviews and decides.
 - Fix every blocking finding and every failed check, then push again. Reply to
