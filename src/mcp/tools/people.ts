@@ -1,9 +1,36 @@
 import { Tool } from './types';
-import { ArgError, idList, num, oneOf, S, updatedAfter } from '../args';
+import { ArgError, bool, idList, num, oneOf, S, updatedAfter } from '../args';
 import { guardResponse } from '../guard';
 import { loadOrg, departmentsForLocations } from '../context';
-import { parseFields, pickUserFields, DEFAULT_USER_FIELDS } from '../privacy';
-import { Rec } from '../../tanda/client';
+import { ignoredFields, parseFields, pickUserFields, DEFAULT_USER_FIELDS, IgnoredField, WAGE_FIELDS } from '../privacy';
+import { Rec, TandaApiError, TandaClient } from '../../tanda/client';
+
+/** Ask Tanda for wages only when a wage field is requested; a 403 drops the wages, not the call. */
+async function withWages<T>(wanted: boolean, fetch: (showWages: boolean) => Promise<T>): Promise<{ data: T; wagesDenied: boolean }> {
+  if (!wanted) return { data: await fetch(false), wagesDenied: false };
+  try {
+    return { data: await fetch(true), wagesDenied: false };
+  } catch (error) {
+    if (!(error instanceof TandaApiError) || error.statusCode !== 403) throw error;
+    return { data: await fetch(false), wagesDenied: true };
+  }
+}
+
+function ignored(extra: string[], records: Rec[], wagesDenied: boolean): { ignored_fields?: IgnoredField[] } {
+  let list = ignoredFields(extra, records);
+  if (wagesDenied) {
+    list = list.filter((f) => !WAGE_FIELDS.has(f.field));
+    for (const f of extra.filter((x) => WAGE_FIELDS.has(x))) list.push({ field: f, reason: 'needs_scope:cost' });
+  }
+  return list.length ? { ignored_fields: list } : {};
+}
+
+async function oneUser(client: TandaClient, userId: number | 'me', extra: string[], showWages: boolean): Promise<Rec> {
+  const { data, wagesDenied } = await withWages(showWages, (w) =>
+    userId === 'me' ? (client.getCurrentUser() as unknown as Promise<Rec>) : client.getUser(userId, { show_wages: w })
+  );
+  return { user: pickUserFields(data, extra), ...ignored(extra, [data], wagesDenied) };
+}
 
 export const peopleTool: Tool = {
   name: 'tanda_people',
@@ -18,7 +45,8 @@ export const peopleTool: Tool = {
       department_ids: S.departmentIds,
       location_ids: S.locationIds,
       search: { type: 'string', description: 'Case-insensitive name match' },
-      fields: { type: 'array', items: { type: 'string' }, description: `Extra fields beyond the default (${DEFAULT_USER_FIELDS.join(', ')})` },
+      fields: { type: 'array', items: { type: 'string' }, description: `Extra fields beyond the default (${DEFAULT_USER_FIELDS.join(', ')}); e.g. hourly_rate (needs the cost scope). Fields that cannot be returned are listed in ignored_fields` },
+      show_wages: { type: 'boolean', description: 'Include hourly_rate (needs the cost scope). Same as adding hourly_rate to fields' },
       updated_after: S.updatedAfter,
       offset: S.offset,
       limit: S.limit,
@@ -26,20 +54,22 @@ export const peopleTool: Tool = {
   },
   async run(client, args) {
     const extra = parseFields(args.fields);
-    if (args.me === true || args.me === 'true') {
-      const me = await client.getCurrentUser();
-      return { user: pickUserFields(me as unknown as Rec, extra) };
-    }
+    if (bool(args.show_wages) && !extra.includes('hourly_rate')) extra.push('hourly_rate');
+    const showWages = extra.some((f) => WAGE_FIELDS.has(f));
+    if (args.me === true || args.me === 'true') return oneUser(client, 'me', extra, showWages);
     const userId = num(args.user_id);
     if (args.user_id !== undefined && !userId) throw new ArgError('user_id must be a number.');
-    if (userId) {
-      return { user: pickUserFields(await client.getUser(userId), extra) };
-    }
+    if (userId) return oneUser(client, userId, extra, showWages);
 
     const status = oneOf(args.status, ['active', 'inactive', 'all'] as const, 'active', 'status');
     const after = updatedAfter(args.updated_after);
     let users: Rec[] = [];
-    if (status !== 'inactive') users.push(...(await client.getUsers({ updated_after: after })));
+    let wagesDenied = false;
+    if (status !== 'inactive') {
+      const res = await withWages(showWages, (w) => client.getUsers({ updated_after: after, show_wages: w }));
+      users.push(...res.data);
+      wagesDenied = res.wagesDenied;
+    }
     if (status !== 'active') users.push(...(await client.getInactiveUsers()));
 
     let deptIds = idList(args.department_ids);
@@ -65,7 +95,7 @@ export const peopleTool: Tool = {
         ...(deptIds ? { department_ids: deptIds } : {}),
       },
       rows,
-      { offset: args.offset, pageSize: args.limit }
+      { offset: args.offset, pageSize: args.limit, extra: ignored(extra, users, wagesDenied) }
     );
   },
 };

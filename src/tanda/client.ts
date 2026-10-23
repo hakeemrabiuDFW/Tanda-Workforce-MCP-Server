@@ -227,8 +227,12 @@ export class TandaClient {
     return this.get<TandaUser>('/users/me');
   }
 
-  async getUsers(filter: { updated_after?: string; department_ids?: number[]; freshMs?: number } = {}): Promise<Rec[]> {
-    const users = await this.getList('/users', { updated_after: filter.updated_after }, { freshMs: filter.freshMs });
+  async getUsers(filter: { updated_after?: string; department_ids?: number[]; freshMs?: number; show_wages?: boolean } = {}): Promise<Rec[]> {
+    const users = await this.getList(
+      '/users',
+      { updated_after: filter.updated_after, show_wages: filter.show_wages ? 'true' : undefined },
+      { freshMs: filter.freshMs }
+    );
     if (filter.department_ids?.length) {
       const wanted = new Set(filter.department_ids);
       return users.filter((u) => ((u.department_ids as number[]) || []).some((id) => wanted.has(id)));
@@ -240,8 +244,8 @@ export class TandaClient {
     return this.getList('/users/inactive');
   }
 
-  async getUser(userId: number): Promise<Rec> {
-    return this.get<Rec>(`/users/${userId}`);
+  async getUser(userId: number, opts: { show_wages?: boolean } = {}): Promise<Rec> {
+    return this.get<Rec>(`/users/${userId}`, { show_wages: opts.show_wages ? 'true' : undefined });
   }
 
   async getStaffByDepartment(departmentId: number): Promise<Rec[]> {

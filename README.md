@@ -7,7 +7,7 @@ A **read-only** MCP (Model Context Protocol) server for the Tanda / Workforce.co
 - **Auth on every MCP route.** `POST /mcp`, `GET /mcp` and `POST /` require an OAuth JWT or `Authorization: Bearer <MCP_SHARED_SECRET>`. Unauthenticated calls get `401`.
 - **Read-only.** The Tanda client refuses any non-GET request.
 - **Least-privilege scopes.** The server requests `me roster timesheet department user cost leave`. It never requests `financial` or `personal`. `unavailability` is off by default because Workforce.com's OAuth fails when it is requested; add it to `TANDA_SCOPES` only if your OAuth app supports it.
-- **Privacy by default.** User records are whitelisted, and `date_of_birth`, `passcode`, `phone`, `email` and `legal_*` are returned only when the `fields` parameter names them.
+- **Privacy by default.** User records are whitelisted, and `date_of_birth`, `phone`, `email`, `legal_*` and `hourly_rate` are returned only when the `fields` parameter names them. `passcode`, `tax_*`, `bank_*` and `super_*` are never returned.
 
 See [docs/SECURITY.md](docs/SECURITY.md).
 
@@ -18,7 +18,7 @@ Every list tool returns `{ summary, rows, page }`. `rows` holds at most 50 entri
 | Tool | Returns / when to use |
 |------|----------------------|
 | `tanda_org` | Locations with departments nested, staff counts, bookkeeping and Supervisor flags. Use it first to resolve names to ids. Cached for 24h, then revalidated with ETag. |
-| `tanda_people` | Privacy-filtered staff, filtered by department, site, status or name. `me: true` returns the authenticated user. Supports `updated_after`. |
+| `tanda_people` | Privacy-filtered staff, filtered by department, site, status or name. `me: true` returns the authenticated user. Supports `updated_after`. `fields: ["hourly_rate"]` (or `show_wages: true`) adds wages when the token has the `cost` scope. Requested fields that can't be returned are listed in `ignored_fields` with a reason: `unknown_field`, `needs_scope:cost` or `not_exposed_by_policy`. |
 | `tanda_schedules` | Rostered shifts (`include_names=true`, optional `show_costs`) with totals by site and day. `view=location_day` returns site × day rows. |
 | `tanda_timesheets` | Worked time from `/timesheets/on/{date}?show_costs&show_award_interpretation`, with shifts embedded. De-duplicated, with totals by status and site. `view=shifts` returns pay codes per shift. |
 | `tanda_live` | Who is clocked in now (`/shifts/active`), with name, site and elapsed hours. Flags shifts open more than 12h. |

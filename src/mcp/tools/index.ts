@@ -61,7 +61,9 @@ export function isKnownTool(name: string): boolean {
  * `fields`) and make sure nothing over 25 KB leaves the server.
  */
 export function finalizeContent(content: unknown, args: Args): unknown {
-  const safe = redactSensitive(content, parseFields(args.fields));
+  const allow = parseFields(args.fields);
+  if (args.show_wages === true || args.show_wages === 'true') allow.push('hourly_rate');
+  const safe = redactSensitive(content, allow);
   if (byteSize(safe) <= MAX_BYTES) return safe;
   if (Array.isArray(safe)) return guardResponse({ total: safe.length }, safe, { offset: args.offset });
   if (safe && typeof safe === 'object') {
