@@ -50,6 +50,9 @@ EXPOSE 3000
 
 # Set environment variables
 ENV NODE_ENV=production
+# Commit this image was built from, reported by /health
+ARG APP_REVISION=
+ENV APP_REVISION=$APP_REVISION
 ENV PORT=3000
 ENV HOST=0.0.0.0
 

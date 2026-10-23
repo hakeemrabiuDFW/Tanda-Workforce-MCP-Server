@@ -1,6 +1,6 @@
 import { createApp } from './server/app';
 import { config } from './config/environment';
-import { logger } from './utils/logger';
+import { logger, describeError } from './utils/logger';
 
 const app = createApp();
 
@@ -26,7 +26,7 @@ server.timeout = 0; // Disable socket timeout for long-lived connections
 
 // Server-level error handlers for better debugging and recovery
 server.on('error', (error: Error) => {
-  logger.error('HTTP server error:', error);
+  logger.error(`HTTP server error: ${describeError(error)}`);
 });
 
 server.on('clientError', (error: Error, socket: import('net').Socket) => {
@@ -60,7 +60,7 @@ process.on('unhandledRejection', (reason, promise) => {
 });
 
 process.on('uncaughtException', (error) => {
-  logger.error('Uncaught Exception:', error);
+  logger.error(`Uncaught Exception: ${describeError(error)}`);
   process.exit(1);
 });
 
