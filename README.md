@@ -26,7 +26,7 @@ Every list tool returns `{ summary, rows, page }`. `rows` holds at most 50 entri
 | `tanda_labor_summary` | Scheduled vs actual hours and cost, with variance, grouped by `location`, `day`, `department` or `user`. |
 | `tanda_coverage` | Supervisor coverage **by location**. `mode=gaps` lists times staff are on site with no supervisor; `mode=overlaps` lists two supervisors at one site or one supervisor double-booked. Includes up to 10 suggested moves. Optional `window_start`/`window_end` (e.g. 17:00–22:00). |
 | `tanda_validate_schedule` | Checks proposed shifts against rosters, leave, unavailability, the 12h shift limit, the 40h week and double-booking. Each check fails soft: a missing scope skips that check and adds `warnings: [{ check, reason }]` instead of failing the call. Nothing is written. |
-| `tanda_exceptions` | Audit list: shifts open more than 12h, zero-length shifts, pending leave already in the past, unapproved timesheet $ by site, active staff with no award template, weeks over 40h. |
+| `tanda_exceptions` | Audit list: shifts open more than 12h, zero-length shifts, pending leave already in the past, unapproved timesheet $ by site, active staff with no award template, weeks over 40h. Unapproved cost is reported for the window (`window_unapproved_cost`) and for every pay period that has ended or is current (`all_open_periods_unapproved_cost`, `pending_open_periods`; looks back `OPEN_PERIOD_LOOKBACK_DAYS`, default 42). |
 | `tanda_export_preview` | Payroll export preview with `approved_only=true` and a hard-coded `skip_status_update=true`. Returns row count, totals and rows missing a pay code. Never returns the raw file. |
 | `tanda_change_history` | Version history from `/shifts/{id}/versions` or `/schedules/{id}/versions`. |
 
@@ -59,6 +59,7 @@ npm run build && npm start
 | `MCP_SHARED_SECRET` + `TANDA_ACCESS_TOKEN` | no | Bearer-secret auth for server-to-server, Claude Desktop and the smoke test |
 | `TANDA_EXPORT_FORMAT` | for export preview | Payroll export format name |
 | `TANDA_TIMEZONE` | no | Default `America/New_York` |
+| `OPEN_PERIOD_LOOKBACK_DAYS` | no | How far back `tanda_exceptions` looks for still-pending pay periods. Default 42 |
 | `TANDA_BOOKKEEPING_LOCATION_IDS` | no | Default `281737,301754,396358` |
 | `TANDA_RATE_LIMIT_PER_MIN` | no | Client-side limit, default 80 (Tanda allows 100/min shared across password tokens) |
 | `MCP_LIST_ALIASES` | no | `true` lists the deprecated names in `tools/list` |

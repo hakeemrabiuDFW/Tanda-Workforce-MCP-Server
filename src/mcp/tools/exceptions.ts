@@ -1,5 +1,5 @@
 import { Tool } from './types';
-import { ArgError, dateRange, idList, S } from '../args';
+import { ArgError, dateRange, idList, num, S } from '../args';
 import { guardResponse } from '../guard';
 import { departmentsForLocations, loadOrg, loadPeople } from '../context';
 import { Rec } from '../../tanda/client';
@@ -17,6 +17,38 @@ export const CHECKS = [
 ] as const;
 type Check = (typeof CHECKS)[number];
 
+/** Default lookback for pending timesheets in earlier pay periods (OPEN_PERIOD_LOOKBACK_DAYS). */
+export const OPEN_PERIOD_LOOKBACK_DAYS = Number(process.env.OPEN_PERIOD_LOOKBACK_DAYS) || 42;
+
+/** Anything not yet approved or exported is unapproved exposure. */
+export function isUnapproved(status: unknown): boolean {
+  const s = String(status || '').toLowerCase();
+  return s !== 'approved' && s !== 'exported';
+}
+
+const period = (ts: Rec) => ({ start: String(ts.start ?? '').slice(0, 10), finish: String(ts.finish ?? '').slice(0, 10) });
+
+interface Exposure {
+  cost: number;
+  hours: number;
+  timesheets: number;
+  period_ranges: string[];
+}
+
+/** Unapproved $ / hours / timesheet count, plus the distinct pay-period ranges they fall in. */
+function exposure(sheets: Array<{ ts: Rec; cost: number; hours: number }>): Exposure {
+  const ranges = new Set<string>();
+  let cost = 0;
+  let hours = 0;
+  for (const { ts, cost: c, hours: h } of sheets) {
+    const p = period(ts);
+    if (p.start) ranges.add(`${p.start}..${p.finish}`);
+    cost += c;
+    hours += h;
+  }
+  return { cost: round2(cost), hours: round2(hours), timesheets: sheets.length, period_ranges: [...ranges].sort() };
+}
+
 export const exceptionsTool: Tool = {
   name: 'tanda_exceptions',
   description:
@@ -28,6 +60,7 @@ export const exceptionsTool: Tool = {
       to: { ...S.to, description: 'End date YYYY-MM-DD. Default today' },
       checks: { type: 'array', items: { type: 'string', enum: [...CHECKS] }, description: 'Subset of checks to run. Default all' },
       location_ids: S.locationIds,
+      open_period_lookback_days: { type: 'number', description: `How far back unapproved_timesheet_cost looks for still-pending pay periods. Default ${OPEN_PERIOD_LOOKBACK_DAYS}, max 90` },
       offset: S.offset,
       limit: S.limit,
     },
@@ -118,23 +151,59 @@ export const exceptionsTool: Tool = {
     if (want('unapproved_timesheet_cost')) {
       const sheets = await client.getTimesheets({ from, to, award_interpretation: false });
       const bySite = new Map<number | null, { cost: number; hours: number; timesheets: Set<unknown> }>();
+      const windowSheets: Array<{ ts: Rec; cost: number; hours: number }> = [];
       for (const ts of sheets) {
-        if (String(ts.status || '').toLowerCase() !== 'pending') continue;
+        if (!isUnapproved(ts.status)) continue;
+        let tsCost = 0;
+        let tsHours = 0;
         for (const s of ts.shifts as Rec[]) {
           if (!inScope(s.department_id)) continue;
           const loc = site(s.department_id).location_id;
           const b = bySite.get(loc) || { cost: 0, hours: 0, timesheets: new Set() };
-          b.cost += typeof s.cost === 'number' ? s.cost : 0;
+          const c = typeof s.cost === 'number' ? s.cost : 0;
+          b.cost += c;
           b.hours += itemHours(s);
           b.timesheets.add(ts.id);
           bySite.set(loc, b);
+          tsCost += c;
+          tsHours += itemHours(s);
         }
+        if (tsCost || tsHours) windowSheets.push({ ts, cost: tsCost, hours: tsHours });
       }
       const list = [...bySite.entries()]
         .map(([loc, b]) => ({ location_id: loc, location_name: org.locationName(loc), unapproved_cost: round2(b.cost), hours: round2(b.hours), timesheets: b.timesheets.size }))
         .sort((a, b) => b.unapproved_cost - a.unapproved_cost);
       for (const r of list) add('unapproved_timesheet_cost', r);
       extra.unapproved_cost_total = round2(list.reduce((n, r) => n + r.unapproved_cost, 0));
+      extra.window_unapproved_cost = { ...exposure(windowSheets), basis: `shifts dated ${from}..${to}` };
+
+      // Every unapproved timesheet in a pay period that has ended or is current, whatever the window
+      const today = todayInZone();
+      const lookback = Math.min(Math.max(num(args.open_period_lookback_days, OPEN_PERIOD_LOOKBACK_DAYS) as number, 1), 90);
+      const openSheets: Array<{ ts: Rec; cost: number; hours: number }> = [];
+      for (const ts of await client.getOpenPeriodTimesheets({ asOf: today, lookbackDays: lookback })) {
+        if (!isUnapproved(ts.status) || period(ts).start > today) continue;
+        const kept = ((Array.isArray(ts.shifts) ? ts.shifts : []) as Rec[]).filter((s) => inScope(s.department_id));
+        const cost = kept.length || deptFilter
+          ? kept.reduce((n, s) => n + (typeof s.cost === 'number' ? s.cost : 0), 0)
+          : typeof ts.cost === 'number' ? ts.cost : 0;
+        const hours = kept.reduce((n, s) => n + itemHours(s), 0);
+        if (cost || hours) openSheets.push({ ts, cost, hours });
+      }
+      const byPeriod = new Map<string, Array<{ ts: Rec; cost: number; hours: number }>>();
+      for (const o of openSheets) {
+        const p = period(o.ts);
+        const k = `${p.start}..${p.finish}`;
+        (byPeriod.get(k) || byPeriod.set(k, []).get(k)!).push(o);
+      }
+      extra.all_open_periods_unapproved_cost = { ...exposure(openSheets), as_of: today, lookback_days: lookback };
+      extra.pending_open_periods = [...byPeriod.entries()]
+        .map(([k, group]) => {
+          const [start, finish] = k.split('..');
+          const e = exposure(group);
+          return { period_start: start, period_finish: finish, period_status: finish < today ? 'ended' : 'current', timesheets: e.timesheets, hours: e.hours, cost: e.cost };
+        })
+        .sort((a, b) => a.period_start.localeCompare(b.period_start));
     }
 
     if (want('missing_award_template')) {
