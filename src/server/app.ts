@@ -5,7 +5,7 @@ import cookieParser from 'cookie-parser';
 import rateLimit from 'express-rate-limit';
 import { config } from '../config/environment';
 import { logger } from '../utils/logger';
-import { oauthManager } from '../auth/oauth';
+import { oauthManager, isAllowedRedirectUri } from '../auth/oauth';
 import { requireAuth, requireMcpAuth, errorHandler, extractBearerToken } from '../auth/middleware';
 import { createMCPRouter } from '../mcp/handler';
 import { pickUserFields } from '../mcp/privacy';
@@ -168,6 +168,16 @@ export function createApp(): Application {
     const clientRedirectUri = req.query.redirect_uri as string;
     const clientState = req.query.state as string;
     const codeChallenge = req.query.code_challenge as string;
+
+    if (!isAllowedRedirectUri(clientRedirectUri)) {
+      logger.warn('OAuth authorize refused: redirect_uri is not an allowed MCP client callback');
+      res.status(400).json({ error: 'invalid_request', error_description: 'redirect_uri is not an allowed MCP client callback' });
+      return;
+    }
+    if (!codeChallenge) {
+      res.status(400).json({ error: 'invalid_request', error_description: 'code_challenge (PKCE, S256) is required' });
+      return;
+    }
 
     // Create session with client OAuth parameters stored server-side
     // This avoids cookie issues with cross-site redirects

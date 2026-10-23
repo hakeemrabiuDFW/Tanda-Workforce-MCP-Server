@@ -100,7 +100,7 @@ describe('OAuth Endpoints', () => {
       const response = await request(app)
         .get('/authorize')
         .query({
-          redirect_uri: 'https://example.com/callback',
+          redirect_uri: 'https://claude.ai/api/mcp/auth_callback',
           state: 'test-state',
           code_challenge: 'test-challenge',
         })
@@ -113,12 +113,87 @@ describe('OAuth Endpoints', () => {
       const response = await request(app)
         .get('/authorize')
         .query({
-          redirect_uri: 'https://example.com/callback',
+          redirect_uri: 'https://claude.ai/api/mcp/auth_callback',
+          code_challenge: 'test-challenge',
         })
         .expect(302);
 
       expect(response.headers['set-cookie']).toBeDefined();
       expect(response.headers['set-cookie'][0]).toContain('tanda_session');
+    });
+
+    it('should refuse a redirect_uri that is not an MCP client callback', async () => {
+      const response = await request(app)
+        .get('/authorize')
+        .query({ redirect_uri: 'https://attacker.example/callback', code_challenge: 'test-challenge' })
+        .expect(400);
+
+      expect(response.body).toHaveProperty('error', 'invalid_request');
+      expect(response.headers.location).toBeUndefined();
+    });
+
+    it('should refuse a missing redirect_uri', async () => {
+      await request(app).get('/authorize').query({ code_challenge: 'test-challenge' }).expect(400);
+    });
+
+    it('should require a PKCE code_challenge', async () => {
+      const response = await request(app)
+        .get('/authorize')
+        .query({ redirect_uri: 'https://claude.ai/api/mcp/auth_callback' })
+        .expect(400);
+
+      expect(response.body.error_description).toContain('code_challenge');
+    });
+
+    it('should allow loopback callbacks for local MCP clients', async () => {
+      await request(app)
+        .get('/authorize')
+        .query({ redirect_uri: 'http://localhost:33418/callback', code_challenge: 'test-challenge' })
+        .expect(302);
+    });
+  });
+
+  describe('isAllowedRedirectUri', () => {
+    const { isAllowedRedirectUri } = jest.requireActual('../src/auth/oauth');
+
+    it('accepts the claude.ai and claude.com callbacks', () => {
+      expect(isAllowedRedirectUri('https://claude.ai/api/mcp/auth_callback')).toBe(true);
+      expect(isAllowedRedirectUri('https://claude.com/api/mcp/auth_callback')).toBe(true);
+    });
+
+    it('rejects look-alikes and non-loopback http', () => {
+      expect(isAllowedRedirectUri('https://claude.ai.attacker.example/api/mcp/auth_callback')).toBe(false);
+      expect(isAllowedRedirectUri('https://claude.ai/api/mcp/auth_callback/../x')).toBe(false);
+      expect(isAllowedRedirectUri('http://10.0.0.5/callback')).toBe(false);
+      expect(isAllowedRedirectUri('javascript:alert(1)')).toBe(false);
+      expect(isAllowedRedirectUri(undefined)).toBe(false);
+    });
+
+    it('accepts extra callbacks from OAUTH_ALLOWED_REDIRECT_URIS', () => {
+      process.env.OAUTH_ALLOWED_REDIRECT_URIS = 'https://example.com/cb, https://other.example/cb';
+      try {
+        expect(isAllowedRedirectUri('https://other.example/cb')).toBe(true);
+      } finally {
+        delete process.env.OAUTH_ALLOWED_REDIRECT_URIS;
+      }
+    });
+  });
+
+  describe('describeError', () => {
+    const { describeError } = jest.requireActual('../src/utils/logger');
+
+    it('keeps the status and Tanda error but drops the request', () => {
+      const err = {
+        isAxiosError: true,
+        message: 'Request failed with status code 400',
+        config: { data: '{"client_secret":"super-secret-value"}', headers: { Authorization: 'Bearer user-token-value' } },
+        response: { status: 400, data: { error: 'invalid_grant', error_description: 'The grant is invalid.' } },
+      };
+      const text = describeError(err);
+
+      expect(text).toBe('HTTP 400 invalid_grant The grant is invalid.');
+      expect(text).not.toContain('super-secret-value');
+      expect(text).not.toContain('user-token-value');
     });
   });
 

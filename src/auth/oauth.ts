@@ -1,7 +1,7 @@
 import jwt from 'jsonwebtoken';
 import { v4 as uuidv4 } from 'uuid';
 import { config } from '../config/environment';
-import { logger } from '../utils/logger';
+import { logger, describeError } from '../utils/logger';
 import { TandaClient, exchangeCodeForToken, buildAuthorizationUrl } from '../tanda/client';
 import { TandaTokenResponse, TandaUser } from '../tanda/types';
 
@@ -69,6 +69,23 @@ export interface AuthResult {
   error?: string;
 }
 
+// Callbacks an MCP client may ask /authorize to return the code to. Anything else is refused,
+// so a crafted link cannot send a signed-in user's code to someone else.
+const DEFAULT_REDIRECT_URIS = ['https://claude.ai/api/mcp/auth_callback', 'https://claude.com/api/mcp/auth_callback'];
+
+export function isAllowedRedirectUri(uri: unknown): boolean {
+  if (typeof uri !== 'string' || !uri) return false;
+  const extra = (process.env.OAUTH_ALLOWED_REDIRECT_URIS || '').split(',').map((s) => s.trim()).filter(Boolean);
+  if ([...DEFAULT_REDIRECT_URIS, ...extra].includes(uri)) return true;
+  try {
+    // Local MCP clients (Claude Code, MCP Inspector) listen on a loopback port.
+    const url = new URL(uri);
+    return url.protocol === 'http:' && (url.hostname === 'localhost' || url.hostname === '127.0.0.1');
+  } catch {
+    return false;
+  }
+}
+
 export class OAuthManager {
   // Generate a new OAuth state and session
   // The state parameter encodes the sessionId so we can recover it from the callback
@@ -111,7 +128,7 @@ export class OAuthManager {
       }
       return null;
     } catch (error) {
-      logger.debug('Failed to decode state:', error);
+      logger.debug(`Failed to decode state: ${describeError(error)}`);
       return null;
     }
   }
@@ -172,14 +189,14 @@ export class OAuthManager {
       // Generate JWT for the client
       const jwtToken = this.generateJWT(sessionId, user);
 
-      logger.info(`OAuth callback successful for user: ${user.email}`);
+      logger.info(`OAuth callback successful for user id: ${user.id}`);
       return {
         success: true,
         token: jwtToken,
         user,
       };
     } catch (error) {
-      logger.error('OAuth callback failed:', error);
+      logger.error(`OAuth callback failed: ${describeError(error)}`);
       return {
         success: false,
         error: error instanceof Error ? error.message : 'OAuth callback failed',
@@ -220,7 +237,7 @@ export class OAuthManager {
       // Generate JWT
       const jwtToken = this.generateJWT(sessionId, user);
 
-      logger.info(`Token exchange successful for user: ${user.email}`);
+      logger.info(`Token exchange successful for user id: ${user.id}`);
       return {
         success: true,
         data: {
@@ -230,7 +247,7 @@ export class OAuthManager {
         },
       };
     } catch (error) {
-      logger.error('Token exchange failed:', error);
+      logger.error(`Token exchange failed: ${describeError(error)}`);
       return {
         success: false,
         error: error instanceof Error ? error.message : 'Token exchange failed',
@@ -257,7 +274,7 @@ export class OAuthManager {
       const payload = jwt.verify(token, config.JWT_SECRET) as JWTPayload;
       return payload;
     } catch (error) {
-      logger.debug('JWT verification failed:', error);
+      logger.debug(`JWT verification failed: ${describeError(error)}`);
       return null;
     }
   }

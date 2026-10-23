@@ -1,7 +1,7 @@
 import { Request, Response, NextFunction } from 'express';
 import crypto from 'crypto';
 import { oauthManager, JWTPayload } from './oauth';
-import { logger } from '../utils/logger';
+import { logger, describeError } from '../utils/logger';
 import { config } from '../config/environment';
 import { TandaClient } from '../tanda/client';
 
@@ -192,7 +192,7 @@ export function errorHandler(
   res: Response,
   next: NextFunction
 ): void {
-  logger.error('Unhandled error:', err);
+  logger.error(`Unhandled error: ${describeError(err)}`);
 
   if (res.headersSent) {
     next(err);
