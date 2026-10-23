@@ -6,6 +6,11 @@
  * (address, emergency contacts, tax file numbers) data are never requested,
  * even if configured via TANDA_SCOPES.
  */
+//
+// `unavailability` is left out: Workforce.com's OAuth authorize page fails with a server
+// error when it is requested. Tools that read unavailability work without it (validate
+// skips that check; time_off reports the missing scope). Add it via TANDA_SCOPES where the
+// OAuth app supports it.
 export const LEAST_PRIVILEGE_SCOPES = [
   'me',
   'roster',
@@ -14,7 +19,6 @@ export const LEAST_PRIVILEGE_SCOPES = [
   'user',
   'cost',
   'leave',
-  'unavailability',
 ] as const;
 
 export const FORBIDDEN_SCOPES = new Set(['financial', 'personal']);

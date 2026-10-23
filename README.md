@@ -6,7 +6,7 @@ A **read-only** MCP (Model Context Protocol) server for the Tanda / Workforce.co
 
 - **Auth on every MCP route.** `POST /mcp`, `GET /mcp` and `POST /` require an OAuth JWT or `Authorization: Bearer <MCP_SHARED_SECRET>`. Unauthenticated calls get `401`.
 - **Read-only.** The Tanda client refuses any non-GET request.
-- **Least-privilege scopes.** The server requests `me roster timesheet department user cost leave unavailability`. It never requests `financial` or `personal`.
+- **Least-privilege scopes.** The server requests `me roster timesheet department user cost leave`. It never requests `financial` or `personal`. `unavailability` is off by default because Workforce.com's OAuth fails when it is requested; add it to `TANDA_SCOPES` only if your OAuth app supports it.
 - **Privacy by default.** User records are whitelisted, and `date_of_birth`, `passcode`, `phone`, `email` and `legal_*` are returned only when the `fields` parameter names them.
 
 See [docs/SECURITY.md](docs/SECURITY.md).
@@ -55,7 +55,7 @@ npm run build && npm start
 | `TANDA_CLIENT_ID`, `TANDA_CLIENT_SECRET` | yes | Tanda OAuth app |
 | `TANDA_REDIRECT_URI` | prod | OAuth callback (auto-detected on Railway) |
 | `SESSION_SECRET`, `JWT_SECRET` | yes | ≥ 32 chars |
-| `TANDA_SCOPES` | no | Default `me roster timesheet department user cost leave unavailability` |
+| `TANDA_SCOPES` | no | Default `me roster timesheet department user cost leave` |
 | `MCP_SHARED_SECRET` + `TANDA_ACCESS_TOKEN` | no | Bearer-secret auth for server-to-server, Claude Desktop and the smoke test |
 | `TANDA_EXPORT_FORMAT` | for export preview | Payroll export format name |
 | `TANDA_TIMEZONE` | no | Default `America/New_York` |
