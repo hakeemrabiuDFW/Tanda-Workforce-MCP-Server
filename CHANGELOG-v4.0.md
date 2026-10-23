@@ -2,7 +2,7 @@
 
 ## Phase 0: Security
 - Every MCP route (`POST /mcp`, `GET /mcp`, `POST /`, other `/mcp` verbs, `/stats`) requires an OAuth JWT or `MCP_SHARED_SECRET`. Every JSON-RPC method is covered, including `initialize`, `tools/list` and `tools/call`; unauthenticated calls return `401`.
-- Tanda scopes come from `TANDA_SCOPES`. The default is the least-privilege set (`me roster timesheet department user cost leave unavailability`), and `financial`/`personal` are always stripped.
+- Tanda scopes come from `TANDA_SCOPES`. The default is the least-privilege set (`me roster timesheet department user cost leave`; `unavailability` is opt-in because Workforce.com OAuth fails on it), and `financial`/`personal` are always stripped.
 - Read-only: the Tanda client rejects any non-GET verb, and write actions and the onboarding prompt are removed.
 
 ## Phase 1: Correctness and privacy

@@ -83,7 +83,7 @@ describe('OAuth scopes', () => {
     const app = createApp();
     const response = await request(app).get('/.well-known/oauth-protected-resource').expect(200);
     expect(response.body.scopes_supported).toEqual([
-      'me', 'roster', 'timesheet', 'department', 'user', 'cost', 'leave', 'unavailability',
+      'me', 'roster', 'timesheet', 'department', 'user', 'cost', 'leave',
     ]);
   });
 
@@ -99,7 +99,7 @@ describe('OAuth scopes', () => {
     const app = createApp();
     const response = await request(app).get('/auth/login').expect(302);
     const url = new URL(response.headers.location);
-    expect(url.searchParams.get('scope')).toBe('me roster timesheet department user cost leave unavailability');
+    expect(url.searchParams.get('scope')).toBe('me roster timesheet department user cost leave');
   });
 });
 

@@ -2,7 +2,7 @@ import { Tool } from './types';
 import { ArgError, num } from '../args';
 import { loadOrg, loadPeople } from '../context';
 import { guardResponse } from '../guard';
-import { Rec } from '../../tanda/client';
+import { Rec, TandaApiError } from '../../tanda/client';
 import { addDays, parseLocalDateTime, round2, toUnixSeconds, toZonedDate, toZonedISO, weekStart } from '../../utils/time';
 import { itemHours } from '../../tanda/normalize';
 import { Interval, overlaps } from './intervals';
@@ -72,6 +72,7 @@ export const validateScheduleTool: Tool = {
     let existing: Rec[] = [];
     let leave: Rec[] = [];
     let unavailable: Rec[] = [];
+    let unavailabilityChecked = true;
     const people = await loadPeople(client);
     if (dates.length) {
       // Cover whole weeks so weekly-hour totals include existing shifts
@@ -81,7 +82,14 @@ export const validateScheduleTool: Tool = {
       [existing, leave, unavailable] = await Promise.all([
         client.getSchedules({ from, to, user_ids: userIds }),
         client.getLeaveRequests({ from, to, user_ids: userIds }),
-        client.getUnavailability({ from, to, user_ids: userIds }),
+        // OAuth tokens usually lack the unavailability scope; validate the rest without it.
+        client.getUnavailability({ from, to, user_ids: userIds }).catch((error) => {
+          if (error instanceof TandaApiError && error.statusCode === 403) {
+            unavailabilityChecked = false;
+            return [];
+          }
+          throw error;
+        }),
       ]);
     }
 
@@ -160,7 +168,9 @@ export const validateScheduleTool: Tool = {
         ok: results.filter((r) => r.ok && (r.warnings as string[]).length === 0).length,
         with_warnings: results.filter((r) => r.ok && (r.warnings as string[]).length > 0).length,
         with_errors: results.filter((r) => !r.ok).length,
-        note: 'Validation only; nothing was written to Tanda.',
+        note: unavailabilityChecked
+          ? 'Validation only; nothing was written to Tanda.'
+          : 'Validation only; nothing was written to Tanda. Unavailability was not checked: this connection lacks the unavailability scope.',
       },
       results
     );
