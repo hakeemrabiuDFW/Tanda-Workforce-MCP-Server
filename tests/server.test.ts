@@ -20,6 +20,16 @@ describe('Server Endpoints', () => {
       expect(response.body).toHaveProperty('timestamp');
       expect(response.body).toHaveProperty('version');
     });
+
+    it('should report the image revision', async () => {
+      process.env.APP_REVISION = 'abc1234';
+      try {
+        const response = await request(app).get('/health').expect(200);
+        expect(response.body).toHaveProperty('revision', 'abc1234');
+      } finally {
+        delete process.env.APP_REVISION;
+      }
+    });
   });
 
   describe('GET /', () => {

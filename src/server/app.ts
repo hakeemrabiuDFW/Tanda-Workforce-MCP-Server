@@ -75,6 +75,8 @@ export function createApp(): Application {
       status: 'healthy',
       timestamp: new Date().toISOString(),
       version: config.MCP_SERVER_VERSION,
+      // Commit the running image was built from (set at image build); lets a deploy confirm it is live.
+      revision: process.env.APP_REVISION || null,
     });
   });
 

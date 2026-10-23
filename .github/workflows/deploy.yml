@@ -1,0 +1,95 @@
+name: Build and deploy
+
+# staging branch -> image :staging    -> Railway service tanda-mcp-stage   (test here first)
+# main branch    -> image :production -> Railway service serving production
+#
+# Every image is also tagged with its commit, so any release can be redeployed exactly.
+# Railway's services track the :staging / :production tags; this workflow builds and
+# tests the image, pushes it, tells Railway to pull it, then waits until /health reports
+# the new commit. Railway's own builders are not used.
+
+on:
+  push:
+    branches: [staging, main]
+  workflow_dispatch:
+
+concurrency:
+  group: deploy-${{ github.ref_name }}
+  cancel-in-progress: false
+
+env:
+  IMAGE: ghcr.io/hakeemrabiudfw/tanda-workforce-mcp-server
+
+jobs:
+  build:
+    if: github.ref_name == 'staging' || github.ref_name == 'main'
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      packages: write
+    outputs:
+      channel: ${{ steps.target.outputs.channel }}
+      sha: ${{ steps.target.outputs.sha }}
+    steps:
+      - uses: actions/checkout@v4
+      - id: target
+        run: |
+          if [ "$GITHUB_REF_NAME" = "main" ]; then echo "channel=production" >> "$GITHUB_OUTPUT"; else echo "channel=staging" >> "$GITHUB_OUTPUT"; fi
+          echo "sha=$(git rev-parse --short=7 HEAD)" >> "$GITHUB_OUTPUT"
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+      - run: npm ci
+      - run: npx tsc --noEmit
+      - run: npm test -- --ci
+      - uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+      - uses: docker/build-push-action@v6
+        with:
+          context: .
+          push: true
+          build-args: APP_REVISION=${{ steps.target.outputs.sha }}
+          tags: |
+            ${{ env.IMAGE }}:${{ steps.target.outputs.sha }}
+            ${{ env.IMAGE }}:${{ steps.target.outputs.channel }}
+          labels: |
+            org.opencontainers.image.source=https://github.com/${{ github.repository }}
+            org.opencontainers.image.revision=${{ steps.target.outputs.sha }}
+            org.opencontainers.image.version=4.0.0
+
+  deploy:
+    needs: build
+    runs-on: ubuntu-latest
+    # A GitHub environment per channel: add required reviewers to "production" in
+    # Settings > Environments to make every production deploy wait for approval.
+    environment: ${{ needs.build.outputs.channel }}
+    env:
+      RAILWAY_TOKEN: ${{ secrets.RAILWAY_TOKEN }}
+      SERVICE_ID: ${{ needs.build.outputs.channel == 'production' && '3cc68f9f-4594-4143-b3ec-8bde67d4da4d' || '0b5bd842-2a62-4427-a81b-8c1fe01eccab' }}
+      URL: ${{ needs.build.outputs.channel == 'production' && 'https://tanda-workforce-mcp-server-production-53ab.up.railway.app' || 'https://tanda-mcp-stage-production.up.railway.app' }}
+      SHA: ${{ needs.build.outputs.sha }}
+    steps:
+      - name: Skip without a Railway token
+        if: env.RAILWAY_TOKEN == ''
+        run: echo "::warning::RAILWAY_TOKEN is not set, so the image was pushed but not deployed. Add a Railway project token as the RAILWAY_TOKEN repository secret."
+      - name: Pull the new image on Railway
+        if: env.RAILWAY_TOKEN != ''
+        run: npx -y @railway/cli@5.63.4 redeploy --service "$SERVICE_ID" --from-source --yes
+      - name: Wait for the new commit to serve
+        if: env.RAILWAY_TOKEN != ''
+        run: |
+          for i in $(seq 1 60); do
+            rev=$(curl -fsS "$URL/health" | python3 -c 'import sys,json; print(json.load(sys.stdin).get("revision") or "")' || true)
+            if [ "$rev" = "$SHA" ]; then echo "Serving $SHA"; break; fi
+            sleep 5
+          done
+          [ "$rev" = "$SHA" ] || { echo "::error::$URL still serves '${rev:-unknown}', expected $SHA"; exit 1; }
+      - name: Check auth is enforced
+        if: env.RAILWAY_TOKEN != ''
+        run: |
+          code=$(curl -s -o /dev/null -w '%{http_code}' -X POST -H 'content-type: application/json' -d '{"jsonrpc":"2.0","id":1,"method":"tools/list"}' "$URL/mcp")
+          [ "$code" = "401" ] || { echo "::error::Unauthenticated /mcp returned $code, expected 401"; exit 1; }
