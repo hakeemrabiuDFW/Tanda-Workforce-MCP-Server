@@ -1,4 +1,5 @@
 #!/usr/bin/env npx ts-node
+/* eslint-disable @typescript-eslint/no-require-imports, @typescript-eslint/no-explicit-any -- reloads the built config with a fresh env per case */
 /**
  * Test script to validate environment configuration logic
  * Run with: npx ts-node scripts/test-env-config.ts
