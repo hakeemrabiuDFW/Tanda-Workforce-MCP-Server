@@ -12,7 +12,13 @@ gh pr view "$PR" --json title,author,body \
   --jq '"# \(.title)\n\nAuthor: \(.author.login)\n\n\(.body)"' > .review/pr.md
 git diff "$BASE_SHA"...HEAD > .review/diff.patch
 
-issues=$(gh pr view "$PR" --json closingIssuesReferences --jq '.closingIssuesReferences[].number')
+# GitHub only links "Closes #N" for PRs into the default branch, so PRs into
+# staging also get their issues from the "Closes/Fixes/Resolves #N" lines in the body.
+issues=$( {
+  gh pr view "$PR" --json closingIssuesReferences --jq '.closingIssuesReferences[].number'
+  gh pr view "$PR" --json body --jq '.body // ""' |
+    grep -oiE '\b(close[sd]?|fix(e[sd])?|resolve[sd]?)[[:space:]]+#[0-9]+' | grep -oE '[0-9]+' || true
+} | sort -un)
 if [ -z "$issues" ]; then
   echo "No linked issue: the PR description does not say Closes #N." > .review/issues.md
 else

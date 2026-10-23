@@ -1,4 +1,4 @@
-// ESLint flat config: recommended JS + TypeScript rules for src/ and tests/.
+// ESLint flat config for the whole repo (`eslint .`): recommended JS + TypeScript rules.
 import js from '@eslint/js';
 import tseslint from 'typescript-eslint';
 import globals from 'globals';
