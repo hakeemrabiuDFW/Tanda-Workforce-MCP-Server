@@ -1,3 +1,22 @@
+# v4.1.0: Backlog P0–P2 from the 2026-10-22 smoke test
+
+Still read-only: no new write path to Tanda.
+
+## Fixed
+- **WFM-001** `tanda_export_preview`: when `TANDA_EXPORT_FORMAT` is missing, the error now names the Tanda setup step (build an isolved format under Settings › Integrations › "Build Your Own"), not just the variable. Previews still always send `approved_only=true` and `skip_status_update=true`.
+- **WFM-002** `tanda_validate_schedule`: each check (roster conflicts, leave, unavailability, active user) fails soft. A 403 skips that check and adds `warnings: [{check, reason: "missing scope: …"}]` instead of failing the call.
+- **WFM-004** `tanda_exceptions` `unapproved_timesheet_cost`: adds `all_open_periods_unapproved_cost` and `pending_open_periods`, covering every unapproved timesheet in a pay period that has ended or is current, whatever the window. The window figure is now `window_unapproved_cost`; `unapproved_cost_total` is kept.
+- **WFM-005** Weekly-hour checks use explicit calendar workweeks (`WORKWEEK_START`, default `MON`, or `workweek_start`). Responses echo `week_basis` and each week's range. New `projected_over_40` check for the current week (worked + still rostered).
+- **WFM-006** `tanda_coverage`: `COVERAGE_EXCLUDE_USER_IDS` users are never counted or suggested as supervisors. Suggestions only name users with the `employee` level who are rostered that day or confirmed available. New `supervision_model` (`site` or `roving`, with `sites_per_supervisor`). Every response includes `assumptions[]`.
+- **WFM-007** `tanda_people`: requested fields that cannot be returned are listed in `ignored_fields` (`unknown_field`, `needs_scope:cost`, `not_exposed_by_policy`). `hourly_rate` comes back with `show_wages` when the token has `cost`. `passcode`, `tax_*`, `bank_*` and `super_*` are never returned, even on request.
+- **WFM-008** Leave balances say whether accruals are configured: `balances_configured`, `case` and a hint.
+
+## Added
+- **WFM-009** `tanda_data_audit`: a one-call data-quality audit (fewer than 20 Tanda requests).
+- **WFM-010** `micro_shift` check in `tanda_exceptions`: shifts under `MIN_SHIFT_MINUTES`, with device match from `/clockins`, change-history authors and `likely_accidental_clockout`.
+- **WFM-011** `tanda_pay_periods`: pay periods from `PAY_CALENDAR`, including the biweekly-to-weekly cutover (last biweekly 2026-12-14..12-27, first weekly 2026-12-28..2027-01-03), with a status rollup and $ by status.
+- **WFM-012** A shared 90/min token bucket across tools (burst 5, so never more than 95 in a minute). 429s are retried 3 times with exponential backoff, and a check that is still rate limited reports `rate_limited: true` in `warnings[]`. People reference data is cached for 24h, like org data.
+
 # v4.0.1: OAuth that stays connected
 
 ## Fixed

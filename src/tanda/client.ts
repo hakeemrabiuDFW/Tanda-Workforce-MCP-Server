@@ -15,7 +15,7 @@ export type Rec = Record<string, unknown>;
  * or response bodies beyond Tanda's own short error text.
  */
 export class TandaApiError extends Error {
-  constructor(message: string, public statusCode: number, public hint?: string) {
+  constructor(message: string, public statusCode: number, public hint?: string, public scope?: string) {
     super(message);
     this.name = 'TandaApiError';
   }
@@ -30,6 +30,8 @@ export interface TandaClientOptions {
   adapter?: AxiosAdapter;
   /** Skip the shared rate limiter (tests only). */
   disableRateLimit?: boolean;
+  /** Base delay for 429 backoff (default 2000 ms; tests use ~1 ms). */
+  retryBaseMs?: number;
   /**
    * Session-level refresher. Tanda refresh tokens are single-use, so when a session owns
    * the tokens a 401 asks it for a new access token (it serializes and saves the rotation)
@@ -61,8 +63,12 @@ function scopeFor(path: string): string {
   if (path.startsWith('/shifts') || path.startsWith('/timesheets')) return 'timesheet';
   if (path.startsWith('/leave')) return 'leave';
   if (path.startsWith('/unavailability')) return 'unavailability';
+  if (path.startsWith('/clockins')) return 'device';
   return 'the required';
 }
+
+/** Retries after a 429 before giving up (delays 2s, 4s, 8s, or Retry-After if longer, capped at 10s). */
+export const MAX_429_RETRIES = 3;
 
 export class TandaClient {
   private client: AxiosInstance;
@@ -72,6 +78,8 @@ export class TandaClient {
   private readonly options: TandaClientOptions;
   /** Stable, non-reversible id for this token; used to scope caches per identity. */
   readonly cacheScope: string;
+  /** Requests actually sent to Tanda by this client (cache hits excluded). */
+  requestCount = 0;
 
   constructor(accessToken: string, refreshToken?: string, expiresIn?: number, options: TandaClientOptions = {}) {
     this.accessToken = accessToken;
@@ -96,6 +104,7 @@ export class TandaClient {
         throw new TandaApiError(`Read-only server: ${method.toUpperCase()} requests to Tanda are disabled`, 403);
       }
       if (!this.options.disableRateLimit) await tandaRateLimiter.acquire();
+      this.requestCount++;
       requestConfig.headers.Authorization = `Bearer ${this.accessToken}`;
       logger.debug(`Tanda API Request: GET ${requestConfig.url}`);
       return requestConfig;
@@ -134,7 +143,7 @@ export class TandaClient {
       case 401:
         return new TandaApiError('Tanda session expired or was revoked.', 401, 'Reconnect the Tanda integration (re-run OAuth) and try again.');
       case 403:
-        return new TandaApiError(`Tanda denied access to ${path}.`, 403, `The token needs the "${scopeFor(path)}" scope and a manager/admin role for this data.`);
+        return new TandaApiError(`Tanda denied access to ${path}.`, 403, `The token needs the "${scopeFor(path)}" scope and a manager/admin role for this data.`, scopeFor(path));
       case 404:
         return new TandaApiError(`Not found in Tanda: ${path}.`, 404, 'Check the id exists and is visible to this account.');
       case 429:
@@ -151,7 +160,8 @@ export class TandaClient {
   }
 
   /**
-   * GET with ETag/If-None-Match caching, one 401 refresh retry and one 429 retry.
+   * GET with ETag/If-None-Match caching, one 401 refresh retry and up to 3 429 retries
+   * with exponential backoff.
    */
   async get<T = unknown>(path: string, params: Record<string, string | undefined> = {}, opts: GetOptions = {}): Promise<T> {
     const clean: Record<string, string> = {};
@@ -167,6 +177,7 @@ export class TandaClient {
     };
 
     let attempt = 0;
+    let rateRetries = 0;
     for (;;) {
       try {
         const response = await this.client.get(path, reqConfig);
@@ -188,10 +199,13 @@ export class TandaClient {
             /* fall through to error mapping */
           }
         }
-        if (status === 429 && attempt === 0) {
-          attempt++;
-          const retryAfter = Number((error as AxiosError).response?.headers?.['retry-after']) || 5;
-          await new Promise((r) => setTimeout(r, Math.min(retryAfter, 10) * 1000));
+        if (status === 429 && rateRetries < MAX_429_RETRIES) {
+          const base = this.options.retryBaseMs ?? 2000;
+          const backoff = base * 2 ** rateRetries;
+          const retryAfterMs = (Number((error as AxiosError).response?.headers?.['retry-after']) || 0) * 1000;
+          rateRetries++;
+          // Honour Retry-After when it is longer, but never sleep more than 10s per retry
+          await new Promise((r) => setTimeout(r, Math.min(Math.max(backoff, retryAfterMs), 10000)));
           continue;
         }
         throw this.toApiError(error, path);
@@ -227,8 +241,12 @@ export class TandaClient {
     return this.get<TandaUser>('/users/me');
   }
 
-  async getUsers(filter: { updated_after?: string; department_ids?: number[]; freshMs?: number } = {}): Promise<Rec[]> {
-    const users = await this.getList('/users', { updated_after: filter.updated_after }, { freshMs: filter.freshMs });
+  async getUsers(filter: { updated_after?: string; department_ids?: number[]; freshMs?: number; show_wages?: boolean } = {}): Promise<Rec[]> {
+    const users = await this.getList(
+      '/users',
+      { updated_after: filter.updated_after, show_wages: filter.show_wages ? 'true' : undefined },
+      { freshMs: filter.freshMs }
+    );
     if (filter.department_ids?.length) {
       const wanted = new Set(filter.department_ids);
       return users.filter((u) => ((u.department_ids as number[]) || []).some((id) => wanted.has(id)));
@@ -240,8 +258,8 @@ export class TandaClient {
     return this.getList('/users/inactive');
   }
 
-  async getUser(userId: number): Promise<Rec> {
-    return this.get<Rec>(`/users/${userId}`);
+  async getUser(userId: number, opts: { show_wages?: boolean } = {}): Promise<Rec> {
+    return this.get<Rec>(`/users/${userId}`, { show_wages: opts.show_wages ? 'true' : undefined });
   }
 
   async getStaffByDepartment(departmentId: number): Promise<Rec[]> {
@@ -296,6 +314,11 @@ export class TandaClient {
     return this.getList('/shifts/active', {}, { noCache: true });
   }
 
+  /** Clock-in events (device_id, type, time) for one user; needs the "device" scope. */
+  async getClockins(filter: { user_id: number; from: string; to: string }): Promise<Rec[]> {
+    return this.getList('/clockins', { user_id: String(filter.user_id), from: filter.from, to: filter.to });
+  }
+
   async getVersions(kind: 'shifts' | 'schedules', id: number): Promise<Rec[]> {
     return this.getList(`/${kind}/${id}/versions`);
   }
@@ -344,6 +367,29 @@ export class TandaClient {
       out.push({ ...ts, shifts, total_cost: Math.round(totalCost * 100) / 100 });
     }
     return out;
+  }
+
+  /**
+   * Every timesheet in the pay periods that contain `asOf` or ended in the `lookbackDays` before it,
+   * walking back one pay period per call (raw timesheets, all shifts kept, de-duplicated by id).
+   */
+  async getOpenPeriodTimesheets(filter: { asOf: string; lookbackDays: number; maxCalls?: number }): Promise<Rec[]> {
+    const earliest = addDays(filter.asOf, -filter.lookbackDays);
+    const byId = new Map<unknown, Rec>();
+    let date = filter.asOf;
+    let calls = 0;
+    while (date >= earliest && calls++ < (filter.maxCalls ?? 12)) {
+      const sheets = await this.getList(`/timesheets/on/${date}`, { show_costs: 'true' });
+      let periodStart: string | null = null;
+      for (const ts of sheets) {
+        if (!byId.has(ts.id)) byId.set(ts.id, ts);
+        const start = typeof ts.start === 'string' ? ts.start.slice(0, 10) : null;
+        if (start && /^\d{4}-\d{2}-\d{2}$/.test(start) && (!periodStart || start < periodStart)) periodStart = start;
+      }
+      // Step to the day before the earliest period start; without one, step back a week.
+      date = periodStart && periodStart <= date ? addDays(periodStart, -1) : addDays(date, -7);
+    }
+    return [...byId.values()];
   }
 
   /**

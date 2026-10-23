@@ -1,7 +1,7 @@
 {
   "name": "tanda-workforce-mcp-server",
-  "version": "4.0.1",
-  "description": "Read-only MCP server for the Tanda Workforce API: 12 consolidated, privacy-filtered tools with OAuth2 or shared-secret auth",
+  "version": "4.1.0",
+  "description": "Read-only MCP server for the Tanda Workforce API: 14 consolidated, privacy-filtered tools with OAuth2 or shared-secret auth",
   "main": "dist/index.js",
   "types": "dist/index.d.ts",
   "scripts": {

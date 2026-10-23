@@ -16,6 +16,8 @@ import { validateScheduleTool } from './validate';
 import { exceptionsTool } from './exceptions';
 import { exportPreviewTool } from './exportPreview';
 import { changeHistoryTool } from './changeHistory';
+import { dataAuditTool } from './dataAudit';
+import { payPeriodsTool } from './payPeriods';
 import { ALIAS_NAMES, resolveAlias, V3_ALIASES } from './aliases';
 
 export type MCPTool = ToolDefinition;
@@ -34,6 +36,8 @@ export const TOOLS: Tool[] = [
   exceptionsTool,
   exportPreviewTool,
   changeHistoryTool,
+  dataAuditTool,
+  payPeriodsTool,
 ];
 
 const byName = new Map(TOOLS.map((t) => [t.name, t]));
@@ -61,7 +65,9 @@ export function isKnownTool(name: string): boolean {
  * `fields`) and make sure nothing over 25 KB leaves the server.
  */
 export function finalizeContent(content: unknown, args: Args): unknown {
-  const safe = redactSensitive(content, parseFields(args.fields));
+  const allow = parseFields(args.fields);
+  if (args.show_wages === true || args.show_wages === 'true') allow.push('hourly_rate');
+  const safe = redactSensitive(content, allow);
   if (byteSize(safe) <= MAX_BYTES) return safe;
   if (Array.isArray(safe)) return guardResponse({ total: safe.length }, safe, { offset: args.offset });
   if (safe && typeof safe === 'object') {

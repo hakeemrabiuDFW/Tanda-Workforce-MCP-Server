@@ -1,5 +1,5 @@
 import { AxiosAdapter, AxiosResponse, InternalAxiosRequestConfig } from 'axios';
-import { TandaClient } from '../../src/tanda/client';
+import { TandaClient, TandaClientOptions } from '../../src/tanda/client';
 
 export interface RecordedRequest {
   method: string;
@@ -23,7 +23,7 @@ const DEFAULT_ROUTES: Array<[string | RegExp, RouteHandler]> = [
  * Build a TandaClient backed by an in-memory router instead of the network.
  * Routes are matched against the path (without /api/v2 base) using exact strings or regexes.
  */
-export function fakeTanda(routes: Array<[string | RegExp, RouteHandler]>) {
+export function fakeTanda(routes: Array<[string | RegExp, RouteHandler]>, options: Partial<TandaClientOptions> = {}) {
   const requests: RecordedRequest[] = [];
 
   const adapter: AxiosAdapter = async (config: InternalAxiosRequestConfig) => {
@@ -70,7 +70,7 @@ export function fakeTanda(routes: Array<[string | RegExp, RouteHandler]>) {
   };
 
   // Unique token per fake so the shared ETag/org cache never leaks between tests
-  const client = new TandaClient(`fake-token-${++counter}`, undefined, undefined, { adapter, disableRateLimit: true });
+  const client = new TandaClient(`fake-token-${++counter}`, undefined, undefined, { adapter, disableRateLimit: true, ...options });
   return { client, requests };
 }
 

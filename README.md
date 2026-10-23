@@ -1,6 +1,6 @@
-# Tanda Workforce MCP Server v4.0.1
+# Tanda Workforce MCP Server v4.1.0
 
-A **read-only** MCP (Model Context Protocol) server for the Tanda / Workforce.com API. It exposes 12 consolidated tools. Every tool is privacy-filtered and returns at most 25 KB, so assistants like Claude can answer workforce questions without overflowing their context.
+A **read-only** MCP (Model Context Protocol) server for the Tanda / Workforce.com API. It exposes 14 consolidated tools. Every tool is privacy-filtered and returns at most 25 KB, so assistants like Claude can answer workforce questions without overflowing their context.
 
 ## Security
 
@@ -11,24 +11,26 @@ A **read-only** MCP (Model Context Protocol) server for the Tanda / Workforce.co
 
 See [docs/SECURITY.md](docs/SECURITY.md).
 
-## Tools (12)
+## Tools (14)
 
-Every list tool returns `{ summary, rows, page }`. `rows` holds at most 50 entries and the whole response is at most 25 KB. When rows are cut, the response sets `truncated: true` and includes `page.next_offset` and a `how_to_page` hint. Time fields come as unix seconds plus `*_iso` strings in `America/New_York`, and `hours` is a decimal. `from`/`to` ranges up to 62 days are split into 7-day Tanda calls internally.
+Every list tool returns `{ summary, rows, page }`. When a missing scope or a Tanda rate limit stops one check, the tool still answers and lists what it skipped in `warnings: [{ check, reason }]` (`rate_limited: true` for rate limits). `rows` holds at most 50 entries and the whole response is at most 25 KB. When rows are cut, the response sets `truncated: true` and includes `page.next_offset` and a `how_to_page` hint. Time fields come as unix seconds plus `*_iso` strings in `America/New_York`, and `hours` is a decimal. `from`/`to` ranges up to 62 days are split into 7-day Tanda calls internally.
 
 | Tool | Returns / when to use |
 |------|----------------------|
 | `tanda_org` | Locations with departments nested, staff counts, bookkeeping and Supervisor flags. Use it first to resolve names to ids. Cached for 24h, then revalidated with ETag. |
-| `tanda_people` | Privacy-filtered staff, filtered by department, site, status or name. `me: true` returns the authenticated user. Supports `updated_after`. |
+| `tanda_people` | Privacy-filtered staff, filtered by department, site, status or name. `me: true` returns the authenticated user. Supports `updated_after`. `fields: ["hourly_rate"]` (or `show_wages: true`) adds wages when the token has the `cost` scope. Requested fields that cannot be returned are listed in `ignored_fields` with a reason: `unknown_field`, `needs_scope:cost` or `not_exposed_by_policy`. |
 | `tanda_schedules` | Rostered shifts (`include_names=true`, optional `show_costs`) with totals by site and day. `view=location_day` returns site × day rows. |
 | `tanda_timesheets` | Worked time from `/timesheets/on/{date}?show_costs&show_award_interpretation`, with shifts embedded. De-duplicated, with totals by status and site. `view=shifts` returns pay codes per shift. |
 | `tanda_live` | Who is clocked in now (`/shifts/active`), with name, site and elapsed hours. Flags shifts open more than 12h. |
-| `tanda_time_off` | `kind=leave`, `unavailability` or `balances` (balances include leave types). |
+| `tanda_time_off` | `kind=leave`, `unavailability` or `balances`. Balances include leave types and say which case applies: `no_accrual_configured` (`balances_configured: false`), `zero_balance` or `has_balance`. |
 | `tanda_labor_summary` | Scheduled vs actual hours and cost, with variance, grouped by `location`, `day`, `department` or `user`. |
-| `tanda_coverage` | Supervisor coverage **by location**. `mode=gaps` lists times staff are on site with no supervisor; `mode=overlaps` lists two supervisors at one site or one supervisor double-booked. Includes up to 10 suggested moves. Optional `window_start`/`window_end` (e.g. 17:00–22:00). |
-| `tanda_validate_schedule` | Checks proposed shifts against rosters, leave, unavailability, the 12h shift limit, the 40h week and double-booking. Nothing is written. |
-| `tanda_exceptions` | Audit list: shifts open more than 12h, zero-length shifts, pending leave already in the past, unapproved timesheet $ by site, active staff with no award template, weeks over 40h. |
+| `tanda_coverage` | Supervisor coverage. `mode=gaps` lists times staff are on site with no supervisor; `mode=overlaps` lists two supervisors at one site or one supervisor double-booked. `supervision_model=site` (default) needs a supervisor at every staffed site; `roving` lets one supervisor on duty cover `sites_per_supervisor` sites. Includes up to 10 suggested moves, which only name users with the `employee` level who are rostered that day or confirmed available, and never anyone in `COVERAGE_EXCLUDE_USER_IDS`. Returns `assumptions[]`. Optional `window_start`/`window_end` (e.g. 17:00–22:00). |
+| `tanda_validate_schedule` | Checks proposed shifts against rosters, leave, unavailability, the 12h shift limit, the 40h workweek and double-booking. Each check fails soft: a missing scope skips that check and adds a warning. Nothing is written. |
+| `tanda_exceptions` | Audit list: shifts open more than 12h, zero-length shifts, micro-shifts (under `MIN_SHIFT_MINUTES`, with device match, change-history authors and `likely_accidental_clockout`), pending leave already in the past, unapproved timesheet $ by site, active staff with no award template, workweeks over 40h and `projected_over_40` for the current week. Unapproved cost is reported for the window (`window_unapproved_cost`) and for every open pay period (`all_open_periods_unapproved_cost`, `pending_open_periods`). Weekly checks use calendar workweeks and echo `week_basis`. |
 | `tanda_export_preview` | Payroll export preview with `approved_only=true` and a hard-coded `skip_status_update=true`. Returns row count, totals and rows missing a pay code. Never returns the raw file. |
 | `tanda_change_history` | Version history from `/shifts/{id}/versions` or `/schedules/{id}/versions`. |
+| `tanda_data_audit` | One-call data-quality audit, with a count and up to 20 sample ids per check: missing award templates, active staff with no shifts in N days, sites with hours but $0 cost, sites below `MIN_EFFECTIVE_RATE`, non-supervisors in Supervisor departments, missing `position_title`, and pending leave that has already started. Uses fewer than 20 Tanda requests. |
+| `tanda_pay_periods` | Current and prior pay periods from `PAY_CALENDAR` (including the biweekly-to-weekly cutover), with a pending / approved / exported rollup and $ by status for each. Warns when Tanda's timesheet periods don't match the calendar. |
 
 A **supervisor** is any user rostered to a department named `Supervisor` or `Supervisors` (case-insensitive). The **bookkeeping sites** 281737 (One Time Projects), 301754 (Floater) and 396358 (MCP Test) are flagged, and analytics tools exclude them by default.
 
@@ -57,10 +59,19 @@ npm run build && npm start
 | `SESSION_SECRET`, `JWT_SECRET` | yes | ≥ 32 chars |
 | `TANDA_SCOPES` | no | Default `me roster timesheet department user cost leave` |
 | `MCP_SHARED_SECRET` + `TANDA_ACCESS_TOKEN` | no | Bearer-secret auth for server-to-server, Claude Desktop and the smoke test |
-| `TANDA_EXPORT_FORMAT` | for export preview | Payroll export format name |
+| `TANDA_EXPORT_FORMAT` | for export preview | Exact name of the payroll export format. Tanda has no native isolved export: build one first under Settings › Integrations › + New Payroll Integration › "Build Your Own" |
 | `TANDA_TIMEZONE` | no | Default `America/New_York` |
 | `TANDA_BOOKKEEPING_LOCATION_IDS` | no | Default `281737,301754,396358` |
-| `TANDA_RATE_LIMIT_PER_MIN` | no | Client-side limit, default 80 (Tanda allows 100/min shared across password tokens) |
+| `TANDA_RATE_LIMIT_PER_MIN` | no | Shared token bucket across all tools, default 90/min with a burst of 5 (Tanda allows 100/min). 429s are retried 3 times with backoff |
+| `PEOPLE_CACHE_TTL_HOURS` | no | How long people reference data is served from cache before ETag revalidation. Default 24 |
+| `WORKWEEK_START` | no | First day of the overtime workweek (`SUN`…`SAT`). Default `MON` |
+| `OPEN_PERIOD_LOOKBACK_DAYS` | no | How far back `tanda_exceptions` looks for still-pending pay periods. Default 42 |
+| `MIN_SHIFT_MINUTES` | no | `micro_shift` threshold. Default 5 |
+| `COVERAGE_EXCLUDE_USER_IDS` | no | Comma-separated user ids never counted or suggested as supervisors (e.g. bookkeeping and admin-only users) |
+| `COVERAGE_SUPERVISION_MODEL` | no | Default `supervision_model` for `tanda_coverage`: `site` (default) or `roving` |
+| `COVERAGE_ROVING_SITES` | no | Sites one roving supervisor covers at once. Default 5 |
+| `MIN_EFFECTIVE_RATE` | no | `tanda_data_audit` flags sites whose cost per hour is below this. Default 16.00 |
+| `PAY_CALENDAR` | no | Pay period segments as `start:days`, comma-separated. Default `2026-12-14:14,2026-12-28:7` (biweekly until 2026-12-27, then weekly) |
 | `MCP_LIST_ALIASES` | no | `true` lists the deprecated names in `tools/list` |
 
 ## Connecting to Claude
@@ -88,7 +99,7 @@ npm run build
 MCP_URL=https://your-domain.com/mcp MCP_TOKEN=<secret> npm run smoke [from] [to]
 ```
 
-`npm run smoke` calls all 12 tools against a running server and prints only the shape and size of each response (no row values). It exits non-zero if a tool errors, exceeds 25 KB, or returns `date_of_birth`/`passcode`.
+`npm run smoke` calls all 14 tools against a running server and prints only the shape and size of each response (no row values). It exits non-zero if a tool errors, exceeds 25 KB, or returns `date_of_birth`/`passcode`.
 
 ## Releasing
 
@@ -118,4 +129,4 @@ src/
 scripts/smoke.mjs
 ```
 
-See [CHANGELOG-v4.0.md](CHANGELOG-v4.0.md) and [DEPLOYMENT.md](DEPLOYMENT.md).
+See [CHANGELOG-v4.0.md](CHANGELOG-v4.0.md) (v4.1.0 is at the top) and [DEPLOYMENT.md](DEPLOYMENT.md).

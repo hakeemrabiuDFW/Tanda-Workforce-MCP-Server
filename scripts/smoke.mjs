@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 /**
- * Smoke test: calls all 12 v4 tools on a running server and prints shape + size only.
+ * Smoke test: calls all 14 tools on a running server and prints shape + size only.
  * No row values are printed, so no PII reaches the terminal.
  *
  *   MCP_URL=https://<host>/mcp MCP_TOKEN=<MCP_SHARED_SECRET or OAuth JWT> node scripts/smoke.mjs [from] [to]
@@ -49,6 +49,8 @@ const calls = [
   ['tanda_exceptions', range],
   ['tanda_export_preview', { date: to }],
   ['tanda_change_history', null], // filled from tanda_timesheets
+  ['tanda_data_audit', {}],
+  ['tanda_pay_periods', {}],
 ];
 
 const listed = (await rpc('tools/list', {})).result?.tools?.map((t) => t.name) || [];

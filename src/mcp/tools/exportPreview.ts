@@ -9,6 +9,12 @@ const NUMERIC_TOTAL_RE = /hours|units|qty|quantity|amount|cost|total|gross/i;
 const ID_RE = /employee.?(id|number|no|code)|payroll.?id|^id$/i;
 const MAX_MISSING_SAMPLES = 25;
 
+/** Tanda has no native isolved integration, so the format must be built in Tanda before this tool works. */
+export const EXPORT_FORMAT_MISSING =
+  'Payroll export preview is not set up. Tanda has no built-in isolved export, so first build one in Tanda: ' +
+  'Settings > Integrations > + New Payroll Integration > "Build Your Own", with columns matching isolved\'s import template. ' +
+  'Then set TANDA_EXPORT_FORMAT on the server to that format\'s exact name and redeploy.';
+
 /** Minimal CSV/TSV parser with quoted-field support. */
 export function parseDelimited(text: string): string[][] {
   const firstLine = text.split(/\r?\n/, 1)[0] || '';
@@ -83,7 +89,7 @@ export const exportPreviewTool: Tool = {
   },
   async run(client, args) {
     const format = process.env.TANDA_EXPORT_FORMAT;
-    if (!format) throw new ArgError('TANDA_EXPORT_FORMAT is not configured on the server; set it to your payroll export format name.');
+    if (!format) throw new ArgError(EXPORT_FORMAT_MISSING);
     const date = (args.date as string | undefined) || todayInZone();
     if (!isDate(date)) throw new ArgError('date must be YYYY-MM-DD.');
 
