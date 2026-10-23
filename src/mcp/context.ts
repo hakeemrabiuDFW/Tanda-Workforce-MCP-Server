@@ -10,6 +10,22 @@ export const BOOKKEEPING_IDS = new Set(
 
 export const SUPERVISOR_DEPT_RE = /^supervisors?$/i;
 
+/** Users never suggested or counted as supervisors (e.g. the external bookkeeper). Set COVERAGE_EXCLUDE_USER_IDS. */
+export function coverageExcludedUserIds(): Set<number> {
+  return new Set(
+    (process.env.COVERAGE_EXCLUDE_USER_IDS || '')
+      .split(',')
+      .map((s) => Number(s.trim()))
+      .filter((n) => Number.isFinite(n) && n > 0)
+  );
+}
+
+/** True when a Tanda user record carries the given user level (e.g. "employee"). */
+export function hasLevel(user: Rec | undefined, level: string): boolean {
+  const levels = user?.user_levels;
+  return Array.isArray(levels) && levels.some((l) => String(l).toLowerCase() === level);
+}
+
 export const ORG_TTL_MS = 24 * 60 * 60 * 1000;
 const USERS_TTL_MS = 10 * 60 * 1000;
 

@@ -155,8 +155,13 @@ describe('tanda_coverage', () => {
       { id: 22, name: 'supervisors', location_id: 2, staff: [] },
       { id: 23, name: 'Supervisor Training', location_id: 2, staff: [] },
     ]],
-    ['/users', () => [{ id: 100, name: 'Sam' }, { id: 101, name: 'Ria' }, { id: 1, name: 'A' }, { id: 2, name: 'B' }]],
+    ['/users', () => [
+      { id: 100, name: 'Sam', user_levels: ['employee'] }, { id: 101, name: 'Ria', user_levels: ['employee'] },
+      { id: 1, name: 'A', user_levels: ['employee'] }, { id: 2, name: 'B', user_levels: ['employee'] },
+    ]],
     ['/schedules', () => schedules],
+    ['/leave', () => []],
+    ['/unavailability', () => []],
   ]);
   const d = '2026-10-20';
 
