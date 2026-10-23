@@ -13,10 +13,12 @@ gh pr view "$PR" --json title,author,body \
 git diff "$BASE_SHA"...HEAD > .review/diff.patch
 
 # GitHub only links "Closes #N" for PRs into the default branch, so PRs into
-# staging also get their issues from the "Closes/Fixes/Resolves #N" lines in the body.
+# staging also get their issues from "Closes/Fixes/Resolves #N" in the body.
+# Fenced blocks and `code spans` are skipped so quoted examples don't count.
 issues=$( {
   gh pr view "$PR" --json closingIssuesReferences --jq '.closingIssuesReferences[].number'
   gh pr view "$PR" --json body --jq '.body // ""' |
+    awk '/^[[:space:]]*```/ { fenced = !fenced; next } !fenced' | sed 's/`[^`]*`//g' |
     grep -oiE '\b(close[sd]?|fix(e[sd])?|resolve[sd]?)[[:space:]]+#[0-9]+' | grep -oE '[0-9]+' || true
 } | sort -un)
 if [ -z "$issues" ]; then
