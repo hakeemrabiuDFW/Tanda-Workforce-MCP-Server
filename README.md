@@ -97,7 +97,7 @@ Changes reach production through `staging` first:
 1. Open a pull request into `staging`. CI runs typecheck, tests and build.
 2. Merge it. **Build and deploy** (`.github/workflows/deploy.yml`) tests again, pushes the image as `:staging` and `:<commit>`, redeploys the `tanda-mcp-stage` Railway service, and waits until its `/health` reports the new commit.
 3. Check staging (`https://tanda-mcp-stage-production.up.railway.app`), for example with `npm run smoke`.
-4. Open a pull request from `staging` into `main` and merge it. The same workflow ships `:production` to the production service.
+4. Merge the release pull request from `staging` into `main`. The **Release PR** workflow (`.github/workflows/release-pr.yml`) opens it as soon as `staging` has changes `main` lacks, lists the change PRs it carries, and keeps it updated; each release gets its own PR. Merging it ships `:production` to the production service.
 
 The deploy step needs a Railway project token as the `RAILWAY_TOKEN` repository secret; without it the image is pushed but not deployed. To require approval for production, add reviewers to the `production` environment in the repository's settings. To roll back, redeploy an earlier deployment in Railway, or point the service at an earlier `:<commit>` image.
 
