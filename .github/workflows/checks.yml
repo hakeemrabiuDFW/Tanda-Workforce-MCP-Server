@@ -1,0 +1,30 @@
+name: checks
+# Typecheck, tests and build. Called by pr-pipeline.yml on every PR, and run
+# on its own for each push to main. This file is the repo-specific part of the
+# pipeline (it replaces ci.yml). No lint step: package.json has "lint" but
+# eslint is not installed.
+
+on:
+  workflow_call:
+  push:
+    branches: [main]
+
+permissions:
+  contents: read
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version: 20
+          cache: npm
+      - run: npm ci
+      - run: npx tsc --noEmit
+      - run: npm test -- --ci
+      - run: npm run build
