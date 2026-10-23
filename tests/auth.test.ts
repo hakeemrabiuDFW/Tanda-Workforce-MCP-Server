@@ -88,7 +88,8 @@ describe('OAuth scopes', () => {
   });
 
   it('strips financial and personal scopes from TANDA_SCOPES', () => {
-    // eslint-disable-next-line @typescript-eslint/no-var-requires
+    // Loaded after the env is set up for this test
+    // eslint-disable-next-line @typescript-eslint/no-require-imports
     const { parseScopes } = require('../src/config/scopes');
     const parsed = parseScopes('me user financial personal roster');
     expect(parsed.scopes).toEqual(['me', 'user', 'roster']);
@@ -105,7 +106,8 @@ describe('OAuth scopes', () => {
 
 describe('Read-only Tanda client', () => {
   it('refuses mutating HTTP verbs', async () => {
-    // eslint-disable-next-line @typescript-eslint/no-var-requires
+    // Loaded after the env is set up for this test
+    // eslint-disable-next-line @typescript-eslint/no-require-imports
     const { TandaClient } = require('../src/tanda/client');
     const client = new TandaClient('token');
     // eslint-disable-next-line @typescript-eslint/no-explicit-any

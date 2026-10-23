@@ -1,3 +1,4 @@
+import crypto from 'crypto';
 import jwt from 'jsonwebtoken';
 import { v4 as uuidv4 } from 'uuid';
 import { config } from '../config/environment';
@@ -489,7 +490,6 @@ export class OAuthManager {
       }
 
       // Validate code_verifier against code_challenge (S256 method)
-      const crypto = require('crypto');
       const expectedChallenge = crypto
         .createHash('sha256')
         .update(codeVerifier)

@@ -234,7 +234,7 @@ export class MCPHandler {
           content = pickUserFields(await tandaClient.getCurrentUser() as unknown as Record<string, unknown>);
           break;
 
-        case 'tanda://organization/info':
+        case 'tanda://organization/info': {
           // Return basic org info (departments and locations)
           const [departments, locations] = await Promise.all([
             tandaClient.getDepartments(),
@@ -247,6 +247,7 @@ export class MCPHandler {
             departments: departments.map((d) => ({ id: d.id, name: d.name, location_id: d.location_id })),
           }, {});
           break;
+        }
 
         default:
           return this.createErrorResponse(
