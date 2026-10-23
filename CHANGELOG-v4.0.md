@@ -1,3 +1,19 @@
+# v4.0.1: OAuth that stays connected
+
+## Fixed
+- Sign-in through Workforce.com works. The default scopes are `me roster timesheet department user cost leave`; `unavailability` made Workforce.com's authorize page fail and is now opt-in through `TANDA_SCOPES`. `tanda_validate_schedule` skips the unavailability check, and says so, when the scope is missing.
+- Sessions no longer break after about 2 hours. Tanda's single-use refresh tokens are now rotated once per session and saved, instead of each request refreshing with a stale copy.
+- A restart or deploy no longer signs everyone out. Refresh tokens carry the Tanda tokens (sealed with AES-256-GCM), so a lost session is rebuilt on the next refresh.
+
+## Added
+- `POST /token` accepts `grant_type=refresh_token`. Access tokens last 1 hour; refresh tokens work once and are replaced on each use. A transient Tanda failure returns `503 temporarily_unavailable` and keeps the session; a revoked grant signs the user out.
+- `/health` reports `revision`, the commit the running image was built from.
+- Staging-first releases: pushes to `staging` deploy the `tanda-mcp-stage` service and pushes to `main` deploy production, each waiting until `/health` reports the new commit (`.github/workflows/deploy.yml`).
+
+## Security
+- Errors are logged without their request, so the OAuth client secret and users' bearer tokens no longer reach the logs. Sign-in logs record the user id, not the email.
+- `/authorize` accepts only the claude.ai and claude.com MCP callbacks, loopback callbacks for local clients, and any listed in `OAUTH_ALLOWED_REDIRECT_URIS`, and requires PKCE.
+
 # v4.0.0: Secure, read-only, 12 tools
 
 ## Phase 0: Security
