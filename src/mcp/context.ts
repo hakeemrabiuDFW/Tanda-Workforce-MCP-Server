@@ -10,6 +10,22 @@ export const BOOKKEEPING_IDS = new Set(
 
 export const SUPERVISOR_DEPT_RE = /^supervisors?$/i;
 
+/** Users never suggested or counted as supervisors (e.g. the external bookkeeper). Set COVERAGE_EXCLUDE_USER_IDS. */
+export function coverageExcludedUserIds(): Set<number> {
+  return new Set(
+    (process.env.COVERAGE_EXCLUDE_USER_IDS || '')
+      .split(',')
+      .map((s) => Number(s.trim()))
+      .filter((n) => Number.isFinite(n) && n > 0)
+  );
+}
+
+/** True when a Tanda user record carries the given user level (e.g. "employee"). */
+export function hasLevel(user: Rec | undefined, level: string): boolean {
+  const levels = user?.user_levels;
+  return Array.isArray(levels) && levels.some((l) => String(l).toLowerCase() === level);
+}
+
 export const ORG_TTL_MS = 24 * 60 * 60 * 1000;
 const USERS_TTL_MS = 10 * 60 * 1000;
 
@@ -33,6 +49,11 @@ export async function loadOrg(client: TandaClient): Promise<Org> {
     client.getLocations({ freshMs: ORG_TTL_MS }),
     client.getDepartments({ freshMs: ORG_TTL_MS }),
   ]);
+  return orgFrom(locations, departments);
+}
+
+/** Build the org lookups from raw lists (empty lists give an empty org, used when a scope is missing). */
+export function orgFrom(locations: Rec[], departments: Rec[]): Org {
   const locationById = new Map(locations.map((l) => [l.id as number, l]));
   const departmentById = new Map(departments.map((d) => [d.id as number, d]));
   const deptLocation = new Map<number, number | null>(
@@ -73,7 +94,10 @@ export interface People {
 
 /** Active users (cached 10 min). Only names/ids are used from here; callers whitelist fields. */
 export async function loadPeople(client: TandaClient): Promise<People> {
-  const users = await client.getUsers({ freshMs: USERS_TTL_MS });
+  return peopleFrom(await client.getUsers({ freshMs: USERS_TTL_MS }));
+}
+
+export function peopleFrom(users: Rec[]): People {
   const byId = new Map(users.map((u) => [u.id as number, u]));
   return { users, byId, name: (id) => ((byId.get(id as number)?.name as string) ?? null) };
 }

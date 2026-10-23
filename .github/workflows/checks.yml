@@ -1,8 +1,7 @@
 name: checks
-# Typecheck, tests and build. Called by pr-pipeline.yml on every PR, and run
-# on its own for each push to main. This file is the repo-specific part of the
-# pipeline (it replaces ci.yml). No lint step: package.json has "lint" but
-# eslint is not installed.
+# Lint, typecheck, tests and build. Called by pr-pipeline.yml on every PR, and
+# run on its own for each push to main. This file is the repo-specific part of
+# the pipeline (it replaces ci.yml).
 
 on:
   workflow_call:
@@ -25,6 +24,7 @@ jobs:
           node-version: 20
           cache: npm
       - run: npm ci
+      - run: npm run lint
       - run: npx tsc --noEmit
       - run: npm test -- --ci
       - run: npm run build

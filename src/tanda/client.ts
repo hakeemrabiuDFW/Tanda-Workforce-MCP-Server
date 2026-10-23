@@ -15,7 +15,7 @@ export type Rec = Record<string, unknown>;
  * or response bodies beyond Tanda's own short error text.
  */
 export class TandaApiError extends Error {
-  constructor(message: string, public statusCode: number, public hint?: string) {
+  constructor(message: string, public statusCode: number, public hint?: string, public scope?: string) {
     super(message);
     this.name = 'TandaApiError';
   }
@@ -134,7 +134,7 @@ export class TandaClient {
       case 401:
         return new TandaApiError('Tanda session expired or was revoked.', 401, 'Reconnect the Tanda integration (re-run OAuth) and try again.');
       case 403:
-        return new TandaApiError(`Tanda denied access to ${path}.`, 403, `The token needs the "${scopeFor(path)}" scope and a manager/admin role for this data.`);
+        return new TandaApiError(`Tanda denied access to ${path}.`, 403, `The token needs the "${scopeFor(path)}" scope and a manager/admin role for this data.`, scopeFor(path));
       case 404:
         return new TandaApiError(`Not found in Tanda: ${path}.`, 404, 'Check the id exists and is visible to this account.');
       case 429:
@@ -227,8 +227,12 @@ export class TandaClient {
     return this.get<TandaUser>('/users/me');
   }
 
-  async getUsers(filter: { updated_after?: string; department_ids?: number[]; freshMs?: number } = {}): Promise<Rec[]> {
-    const users = await this.getList('/users', { updated_after: filter.updated_after }, { freshMs: filter.freshMs });
+  async getUsers(filter: { updated_after?: string; department_ids?: number[]; freshMs?: number; show_wages?: boolean } = {}): Promise<Rec[]> {
+    const users = await this.getList(
+      '/users',
+      { updated_after: filter.updated_after, show_wages: filter.show_wages ? 'true' : undefined },
+      { freshMs: filter.freshMs }
+    );
     if (filter.department_ids?.length) {
       const wanted = new Set(filter.department_ids);
       return users.filter((u) => ((u.department_ids as number[]) || []).some((id) => wanted.has(id)));
@@ -240,8 +244,8 @@ export class TandaClient {
     return this.getList('/users/inactive');
   }
 
-  async getUser(userId: number): Promise<Rec> {
-    return this.get<Rec>(`/users/${userId}`);
+  async getUser(userId: number, opts: { show_wages?: boolean } = {}): Promise<Rec> {
+    return this.get<Rec>(`/users/${userId}`, { show_wages: opts.show_wages ? 'true' : undefined });
   }
 
   async getStaffByDepartment(departmentId: number): Promise<Rec[]> {
@@ -344,6 +348,29 @@ export class TandaClient {
       out.push({ ...ts, shifts, total_cost: Math.round(totalCost * 100) / 100 });
     }
     return out;
+  }
+
+  /**
+   * Every timesheet in the pay periods that contain `asOf` or ended in the `lookbackDays` before it,
+   * walking back one pay period per call (raw timesheets, all shifts kept, de-duplicated by id).
+   */
+  async getOpenPeriodTimesheets(filter: { asOf: string; lookbackDays: number; maxCalls?: number }): Promise<Rec[]> {
+    const earliest = addDays(filter.asOf, -filter.lookbackDays);
+    const byId = new Map<unknown, Rec>();
+    let date = filter.asOf;
+    let calls = 0;
+    while (date >= earliest && calls++ < (filter.maxCalls ?? 12)) {
+      const sheets = await this.getList(`/timesheets/on/${date}`, { show_costs: 'true' });
+      let periodStart: string | null = null;
+      for (const ts of sheets) {
+        if (!byId.has(ts.id)) byId.set(ts.id, ts);
+        const start = typeof ts.start === 'string' ? ts.start.slice(0, 10) : null;
+        if (start && /^\d{4}-\d{2}-\d{2}$/.test(start) && (!periodStart || start < periodStart)) periodStart = start;
+      }
+      // Step to the day before the earliest period start; without one, step back a week.
+      date = periodStart && periodStart <= date ? addDays(periodStart, -1) : addDays(date, -7);
+    }
+    return [...byId.values()];
   }
 
   /**

@@ -128,8 +128,26 @@ export function chunkDateRange(from: string, to: string, maxDays = 7): Array<{ f
 
 /** Monday (YYYY-MM-DD) of the ISO week containing `date`. */
 export function weekStart(date: string): string {
+  return weekStartOn(date, 1);
+}
+
+export const WEEKDAYS = ['SUN', 'MON', 'TUE', 'WED', 'THU', 'FRI', 'SAT'] as const;
+export type Weekday = (typeof WEEKDAYS)[number];
+
+/** First day (YYYY-MM-DD) of the week containing `date`, for weeks starting on `startDay` (0 = Sunday). */
+export function weekStartOn(date: string, startDay: number): string {
   const day = new Date(`${date}T00:00:00Z`).getUTCDay(); // 0 = Sunday
-  return addDays(date, day === 0 ? -6 : 1 - day);
+  return addDays(date, -((day - startDay + 7) % 7));
+}
+
+const WEEKDAY_NAMES = ['SUNDAY', 'MONDAY', 'TUESDAY', 'WEDNESDAY', 'THURSDAY', 'FRIDAY', 'SATURDAY'];
+
+/** Parse a weekday ("MON", "monday", "Sun") to 0-6, or null. Only 3-letter or full names count. */
+export function parseWeekday(value: unknown): number | null {
+  if (typeof value !== 'string') return null;
+  const v = value.trim().toUpperCase();
+  const i = v.length === 3 ? WEEKDAYS.indexOf(v as Weekday) : WEEKDAY_NAMES.indexOf(v);
+  return i >= 0 ? i : null;
 }
 
 /** Add `<field>_iso` next to each unix timestamp field present on a row. */

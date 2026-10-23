@@ -155,8 +155,13 @@ describe('tanda_coverage', () => {
       { id: 22, name: 'supervisors', location_id: 2, staff: [] },
       { id: 23, name: 'Supervisor Training', location_id: 2, staff: [] },
     ]],
-    ['/users', () => [{ id: 100, name: 'Sam' }, { id: 101, name: 'Ria' }, { id: 1, name: 'A' }, { id: 2, name: 'B' }]],
+    ['/users', () => [
+      { id: 100, name: 'Sam', user_levels: ['employee'] }, { id: 101, name: 'Ria', user_levels: ['employee'] },
+      { id: 1, name: 'A', user_levels: ['employee'] }, { id: 2, name: 'B', user_levels: ['employee'] },
+    ]],
     ['/schedules', () => schedules],
+    ['/leave', () => []],
+    ['/unavailability', () => []],
   ]);
   const d = '2026-10-20';
 
@@ -275,7 +280,7 @@ describe('tanda_validate_schedule', () => {
       shifts: [{ user_id: 1, start: `${day} 10:00`, finish: `${day} 14:00` }],
     })).content as Content;
     expect([...(res.rows[0].errors as string[]), ...(res.rows[0].warnings as string[])].join('; ')).toMatch(/overlaps existing schedule 50/);
-    expect(res.summary.note).toMatch(/Unavailability was not checked/);
+    expect((res as unknown as { warnings: unknown[] }).warnings).toEqual([{ check: 'unavailability', reason: 'missing scope: unavailability' }]);
   });
 });
 
