@@ -43,8 +43,9 @@ export function ignoredFields(requested: string[], records: Record<string, unkno
     if ((DEFAULT_USER_FIELDS as readonly string[]).includes(field)) continue;
     if (isPolicyBlocked(field)) out.push({ field, reason: 'not_exposed_by_policy' });
     else if (records.some((r) => field in r)) continue;
+    else if (!records.length) continue; // nothing returned, so nothing to judge
     else if (WAGE_FIELDS.has(field)) out.push({ field, reason: 'needs_scope:cost' });
-    else if (records.length) out.push({ field, reason: 'unknown_field' });
+    else out.push({ field, reason: 'unknown_field' });
   }
   return out;
 }

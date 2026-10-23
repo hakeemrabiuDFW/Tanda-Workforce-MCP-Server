@@ -1,6 +1,7 @@
 /** WFM-007 (#54): tanda_people reports fields it cannot return. */
 import { executeTool } from '../src/mcp/tools';
 import { fakeTanda } from './helpers/fakeTanda';
+import { redactSensitive } from '../src/mcp/privacy';
 
 type Content = { summary: Record<string, unknown>; rows: Array<Record<string, unknown>>; ignored_fields?: Array<Record<string, unknown>>; user?: Record<string, unknown> };
 
@@ -51,10 +52,28 @@ describe('WFM-007 tanda_people reports ignored fields', () => {
   });
 });
 
-
 describe('WFM-007 redaction scope', () => {
-  it('only hourly_rate is a wage key: export columns such as "Wages" survive', async () => {
-    const { redactSensitive } = await import('../src/mcp/privacy');
+  it('only hourly_rate is a wage key: export columns such as "Wages" survive', () => {
     expect(redactSensitive({ Wages: 1, 'Wage Type': 'ORD', wages_cost: 2, hourly_rate: 18 })).toEqual({ Wages: 1, 'Wage Type': 'ORD', wages_cost: 2 });
+  });
+});
+
+describe('WFM-007 edge cases', () => {
+  const user = { id: 1, name: 'Pat', active: true };
+  it('me: true returns hourly_rate when the scope allows it', async () => {
+    const { client } = fakeTanda([
+      ['/users/me', () => user],
+      ['/users/1', (r) => (r.params.show_wages ? { ...user, hourly_rate: 18.5 } : user)],
+    ]);
+    const res = await run(client, 'tanda_people', { me: true, fields: ['hourly_rate'] });
+    expect(res.content.user!.hourly_rate).toBe(18.5);
+    expect(res.content.ignored_fields).toBeUndefined();
+  });
+
+  it('a search that matches nobody reports no ignored fields', async () => {
+    const { client } = fakeTanda([['/users', () => [{ ...user, hourly_rate: 18.5 }]]]);
+    const res = await run(client, 'tanda_people', { search: 'nobody', fields: ['hourly_rate', 'pay_group_id'] });
+    expect(res.content.rows).toHaveLength(0);
+    expect(res.content.ignored_fields).toBeUndefined();
   });
 });

@@ -26,8 +26,10 @@ function ignored(extra: string[], records: Rec[], wagesDenied: boolean): { ignor
 }
 
 async function oneUser(client: TandaClient, userId: number | 'me', extra: string[], showWages: boolean): Promise<Rec> {
+  // /users/me has no wage option, so with wages requested look the user up by id instead
+  const id = userId === 'me' && showWages ? ((await client.getCurrentUser()) as unknown as Rec).id as number : userId;
   const { data, wagesDenied } = await withWages(showWages, (w) =>
-    userId === 'me' ? (client.getCurrentUser() as unknown as Promise<Rec>) : client.getUser(userId, { show_wages: w })
+    id === 'me' ? (client.getCurrentUser() as unknown as Promise<Rec>) : client.getUser(id, { show_wages: w })
   );
   return { user: pickUserFields(data, extra), ...ignored(extra, [data], wagesDenied) };
 }
