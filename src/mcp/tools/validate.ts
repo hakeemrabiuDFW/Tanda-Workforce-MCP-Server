@@ -3,10 +3,11 @@ import { ArgError, num } from '../args';
 import { loadOrg, loadPeople, orgFrom, peopleFrom } from '../context';
 import { guardResponse } from '../guard';
 import { Rec } from '../../tanda/client';
-import { addDays, parseLocalDateTime, round2, toUnixSeconds, toZonedDate, toZonedISO, weekStart } from '../../utils/time';
+import { parseLocalDateTime, round2, toUnixSeconds, toZonedDate, toZonedISO } from '../../utils/time';
 import { itemHours } from '../../tanda/normalize';
 import { Interval, overlaps } from './intervals';
 import { soft, Warning, withWarnings } from '../warnings';
+import { workweek } from '../workweek';
 
 const MAX_PROPOSALS = 50;
 
@@ -43,6 +44,7 @@ export const validateScheduleTool: Tool = {
       },
       max_shift_hours: { type: 'number', description: 'Default 12' },
       max_weekly_hours: { type: 'number', description: 'Default 40' },
+      workweek_start: { type: 'string', enum: ['SUN', 'MON', 'TUE', 'WED', 'THU', 'FRI', 'SAT'], description: 'First day of the overtime week. Default WORKWEEK_START (MON)' },
     },
     required: ['shifts'],
   },
@@ -52,6 +54,7 @@ export const validateScheduleTool: Tool = {
     if (input.length > MAX_PROPOSALS) throw new ArgError(`At most ${MAX_PROPOSALS} shifts per call.`);
     const maxShift = num(args.max_shift_hours, 12) as number;
     const maxWeek = num(args.max_weekly_hours, 40) as number;
+    const week = workweek(args.workweek_start);
 
     // Each check fails soft: a missing scope skips that check and adds a warning.
     const warnings: Warning[] = [];
@@ -79,8 +82,8 @@ export const validateScheduleTool: Tool = {
     let peopleChecked = true;
     if (dates.length) {
       // Cover whole weeks so weekly-hour totals include existing shifts
-      const from = weekStart(dates[0]);
-      const to = addDays(weekStart(dates[dates.length - 1]), 6);
+      const from = week.start(dates[0]);
+      const to = week.end(dates[dates.length - 1]);
       const userIds = [...new Set(valid.map((p) => p.user_id).filter((u): u is number => u !== null))];
       const rosterWarnings: Warning[] = [];
       [existing, leave, unavailable, people] = await Promise.all([
@@ -101,7 +104,7 @@ export const validateScheduleTool: Tool = {
     for (const s of existing) {
       const d = toZonedDate(s.start);
       if (!d) continue;
-      const k = `${s.user_id}|${weekStart(d)}`;
+      const k = `${s.user_id}|${week.start(d)}`;
       weekly.set(k, (weekly.get(k) || 0) + itemHours(s));
     }
 
@@ -145,10 +148,10 @@ export const validateScheduleTool: Tool = {
           }
         }
 
-        const k = `${p.user_id}|${weekStart(startDate)}`;
+        const k = `${p.user_id}|${week.start(startDate)}`;
         const total = (weekly.get(k) || 0) + Math.max(0, hours);
         weekly.set(k, total);
-        if (total > maxWeek) issues.push(`week of ${weekStart(startDate)} totals ${round2(total)}h (> ${maxWeek}h)`);
+        if (total > maxWeek) issues.push(`week of ${week.start(startDate)} totals ${round2(total)}h (> ${maxWeek}h)`);
       }
 
       results.push({
@@ -173,6 +176,7 @@ export const validateScheduleTool: Tool = {
         with_warnings: results.filter((r) => r.ok && (r.warnings as string[]).length > 0).length,
         with_errors: results.filter((r) => !r.ok).length,
         ...(warnings.length ? { checks_skipped: [...new Set(warnings.map((w) => w.check))] } : {}),
+        week_basis: week.basis,
         note: 'Validation only; nothing was written to Tanda.',
       },
       results,
