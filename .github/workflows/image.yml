@@ -1,21 +1,20 @@
 name: Image
 
-# Builds a container image from a pinned commit and pushes it to GHCR, so
-# Railway can deploy from an image when its own builders are unavailable.
+# Builds a container image for every push to main (or a chosen commit, run by hand) and
+# pushes it to GHCR, so Railway can deploy a tested image by digest, even when its own
+# builders are unavailable.
 
 on:
+  push:
+    branches: [main]
   workflow_dispatch:
     inputs:
       ref:
-        description: Commit to build
-        required: true
-        default: 5037cdc7a9c9460beac930435285189d9e981a23
-  push:
-    branches: [claude/new-session-gjdhu7]
-    paths: [.github/workflows/image.yml]
+        description: Commit to build (default the branch head)
+        required: false
 
 env:
-  REF: ${{ github.event.inputs.ref || '5037cdc7a9c9460beac930435285189d9e981a23' }}
+  REF: ${{ github.event.inputs.ref || github.sha }}
   IMAGE: ghcr.io/hakeemrabiudfw/tanda-workforce-mcp-server
 
 jobs:
@@ -46,7 +45,9 @@ jobs:
         with:
           context: .
           push: true
-          tags: ${{ env.IMAGE }}:${{ steps.meta.outputs.sha }}
+          tags: |
+            ${{ env.IMAGE }}:${{ steps.meta.outputs.sha }}
+            ${{ github.ref == 'refs/heads/main' && !github.event.inputs.ref && format('{0}:main', env.IMAGE) || '' }}
           labels: |
             org.opencontainers.image.source=https://github.com/${{ github.repository }}
             org.opencontainers.image.revision=${{ steps.meta.outputs.sha }}
