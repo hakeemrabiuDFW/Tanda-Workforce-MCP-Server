@@ -22,7 +22,7 @@ Every list tool returns `{ summary, rows, page }`. `rows` holds at most 50 entri
 | `tanda_schedules` | Rostered shifts (`include_names=true`, optional `show_costs`) with totals by site and day. `view=location_day` returns site × day rows. |
 | `tanda_timesheets` | Worked time from `/timesheets/on/{date}?show_costs&show_award_interpretation`, with shifts embedded. De-duplicated, with totals by status and site. `view=shifts` returns pay codes per shift. |
 | `tanda_live` | Who is clocked in now (`/shifts/active`), with name, site and elapsed hours. Flags shifts open more than 12h. |
-| `tanda_time_off` | `kind=leave`, `unavailability` or `balances` (balances include leave types). |
+| `tanda_time_off` | `kind=leave`, `unavailability` or `balances`. Balances include leave types and say which case applies: `no_accrual_configured` (`balances_configured: false`, with a hint), `zero_balance` or `has_balance`. |
 | `tanda_labor_summary` | Scheduled vs actual hours and cost, with variance, grouped by `location`, `day`, `department` or `user`. |
 | `tanda_coverage` | Supervisor coverage **by location**. `mode=gaps` lists times staff are on site with no supervisor; `mode=overlaps` lists two supervisors at one site or one supervisor double-booked. Includes up to 10 suggested moves. Optional `window_start`/`window_end` (e.g. 17:00–22:00). |
 | `tanda_validate_schedule` | Checks proposed shifts against rosters, leave, unavailability, the 12h shift limit, the 40h week and double-booking. Each check fails soft: a missing scope skips that check and adds `warnings: [{ check, reason }]` instead of failing the call. Nothing is written. |

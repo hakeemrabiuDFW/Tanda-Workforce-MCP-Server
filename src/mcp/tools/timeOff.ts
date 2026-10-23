@@ -7,6 +7,29 @@ import { round2, toZonedISO } from '../../utils/time';
 
 const LEAVE_STATUSES = ['pending', 'approved', 'rejected'] as const;
 
+/**
+ * Tell "no accrual set up in Tanda" apart from "a real balance of zero". An empty balance list
+ * means Tanda tracks no accrual for this user, even when leave types (e.g. Sick Leave) exist:
+ * the balance may be kept in payroll instead.
+ */
+export function balanceCase(rows: Rec[], leaveTypes: string[]): Rec {
+  if (rows.length === 0) {
+    return {
+      balances_configured: false,
+      case: 'no_accrual_configured',
+      hint: leaveTypes.length
+        ? `Leave types exist (${leaveTypes.join(', ')}) but Tanda has no accrual/balance set up for this user. If balances are tracked in payroll (isolved), check there; otherwise set up accruals on the user's leave settings in Tanda.`
+        : "Tanda has no leave balances or accruals set up for this user. Check the user's leave settings in Tanda, or payroll (isolved) if balances are tracked there.",
+    };
+  }
+  const zero = rows.every((r) => typeof r.balance === 'number' && r.balance === 0);
+  return {
+    balances_configured: true,
+    case: zero ? 'zero_balance' : 'has_balance',
+    ...(zero ? { hint: 'Accruals are set up in Tanda and every balance is currently 0.' } : {}),
+  };
+}
+
 export const timeOffTool: Tool = {
   name: 'tanda_time_off',
   description:
@@ -40,10 +63,12 @@ export const timeOffTool: Tool = {
         balance: typeof b.balance === 'number' ? round2(b.balance) : b.balance,
         ...(b.should_accrue !== undefined ? { accrues: b.should_accrue } : {}),
       }));
-      return guardResponse({ user_id: userId, balances: rows.length, ...(types ? { leave_types: types } : {}) }, rows, {
-        offset: args.offset,
-        pageSize: args.limit,
-      });
+      const typeNames = Array.isArray(types) ? types.map((t) => (t && typeof t === 'object' ? (t as Rec).name ?? (t as Rec).leave_type : t)).map(String) : [];
+      return guardResponse(
+        { user_id: userId, balances: rows.length, ...balanceCase(rows, typeNames), ...(types ? { leave_types: types } : {}) },
+        rows,
+        { offset: args.offset, pageSize: args.limit }
+      );
     }
 
     const { from, to } = dateRange(args);
