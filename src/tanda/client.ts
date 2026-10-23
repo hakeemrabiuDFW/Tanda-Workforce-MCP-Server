@@ -15,7 +15,7 @@ export type Rec = Record<string, unknown>;
  * or response bodies beyond Tanda's own short error text.
  */
 export class TandaApiError extends Error {
-  constructor(message: string, public statusCode: number, public hint?: string) {
+  constructor(message: string, public statusCode: number, public hint?: string, public scope?: string) {
     super(message);
     this.name = 'TandaApiError';
   }
@@ -134,7 +134,7 @@ export class TandaClient {
       case 401:
         return new TandaApiError('Tanda session expired or was revoked.', 401, 'Reconnect the Tanda integration (re-run OAuth) and try again.');
       case 403:
-        return new TandaApiError(`Tanda denied access to ${path}.`, 403, `The token needs the "${scopeFor(path)}" scope and a manager/admin role for this data.`);
+        return new TandaApiError(`Tanda denied access to ${path}.`, 403, `The token needs the "${scopeFor(path)}" scope and a manager/admin role for this data.`, scopeFor(path));
       case 404:
         return new TandaApiError(`Not found in Tanda: ${path}.`, 404, 'Check the id exists and is visible to this account.');
       case 429:
