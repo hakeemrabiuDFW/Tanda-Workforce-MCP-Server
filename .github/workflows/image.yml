@@ -9,13 +9,13 @@ on:
       ref:
         description: Commit to build
         required: true
-        default: dfe6b0af8b795f6d6b6306fd71f077fffb048c1c
+        default: ec61b0bb6e5077b3a1254440eea760a308f05ffc
   push:
     branches: [claude/new-session-gjdhu7]
     paths: [.github/workflows/image.yml]
 
 env:
-  REF: ${{ github.event.inputs.ref || 'dfe6b0af8b795f6d6b6306fd71f077fffb048c1c' }}
+  REF: ${{ github.event.inputs.ref || 'ec61b0bb6e5077b3a1254440eea760a308f05ffc' }}
   IMAGE: ghcr.io/hakeemrabiudfw/tanda-workforce-mcp-server
 
 jobs:
