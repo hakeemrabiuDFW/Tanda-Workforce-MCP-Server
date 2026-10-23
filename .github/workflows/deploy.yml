@@ -59,7 +59,7 @@ jobs:
           labels: |
             org.opencontainers.image.source=https://github.com/${{ github.repository }}
             org.opencontainers.image.revision=${{ steps.target.outputs.sha }}
-            org.opencontainers.image.version=4.0.0
+            org.opencontainers.image.version=4.0.1
 
   deploy:
     needs: build

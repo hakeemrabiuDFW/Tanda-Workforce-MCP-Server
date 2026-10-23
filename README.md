@@ -1,4 +1,4 @@
-# Tanda Workforce MCP Server v4.0.0
+# Tanda Workforce MCP Server v4.0.1
 
 A **read-only** MCP (Model Context Protocol) server for the Tanda / Workforce.com API. It exposes 12 consolidated tools. Every tool is privacy-filtered and returns at most 25 KB, so assistants like Claude can answer workforce questions without overflowing their context.
 
