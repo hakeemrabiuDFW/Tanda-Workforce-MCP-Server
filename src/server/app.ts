@@ -157,7 +157,7 @@ export function createApp(): Application {
       client_name: client_name || 'MCP Client',
       redirect_uris: redirect_uris || [],
       token_endpoint_auth_method: token_endpoint_auth_method || 'none',
-      grant_types: ['authorization_code'],
+      grant_types: ['authorization_code', 'refresh_token'],
       response_types: ['code'],
     });
   });
@@ -201,17 +201,17 @@ export function createApp(): Application {
 
   // POST /token - Standard OAuth2 token endpoint (for Claude MCP)
   app.post('/token', async (req: Request, res: Response) => {
-    const { code, grant_type, code_verifier } = req.body;
+    const { code, grant_type, code_verifier, refresh_token } = req.body;
 
-    if (grant_type !== 'authorization_code') {
+    if (grant_type !== 'authorization_code' && grant_type !== 'refresh_token') {
       res.status(400).json({
         error: 'unsupported_grant_type',
-        error_description: 'Only authorization_code grant type is supported',
+        error_description: 'Supported grant types are authorization_code and refresh_token',
       });
       return;
     }
 
-    if (!code) {
+    if (grant_type === 'authorization_code' && !code) {
       res.status(400).json({
         error: 'invalid_request',
         error_description: 'Authorization code is required',
@@ -219,23 +219,36 @@ export function createApp(): Application {
       return;
     }
 
-    // Exchange our authorization code (not Tanda's) for a JWT
-    // Pass code_verifier for PKCE validation
-    const result = oauthManager.exchangeAuthCode(code, code_verifier);
+    if (grant_type === 'refresh_token' && !refresh_token) {
+      res.status(400).json({
+        error: 'invalid_request',
+        error_description: 'refresh_token is required',
+      });
+      return;
+    }
+
+    // Exchange our authorization code (not Tanda's) for tokens, validating PKCE,
+    // or spend a refresh token for a new pair.
+    const result = grant_type === 'authorization_code'
+      ? await oauthManager.exchangeAuthCode(code, code_verifier)
+      : await oauthManager.exchangeRefreshToken(refresh_token);
 
     if (!result.success) {
-      res.status(400).json({
-        error: 'invalid_grant',
+      const retryable = 'retryable' in result && result.retryable;
+      res.status(retryable ? 503 : 400).json({
+        error: retryable ? 'temporarily_unavailable' : 'invalid_grant',
         error_description: result.error,
       });
       return;
     }
 
     // Return OAuth2 standard token response
+    res.set('Cache-Control', 'no-store');
     res.json({
       access_token: result.accessToken,
       token_type: 'Bearer',
-      expires_in: 86400, // 24 hours
+      expires_in: result.expiresIn,
+      refresh_token: result.refreshToken,
     });
   });
 

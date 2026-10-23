@@ -2,13 +2,15 @@ import jwt from 'jsonwebtoken';
 import { v4 as uuidv4 } from 'uuid';
 import { config } from '../config/environment';
 import { logger, describeError } from '../utils/logger';
-import { TandaClient, exchangeCodeForToken, buildAuthorizationUrl } from '../tanda/client';
+import { TandaClient, TandaApiError, exchangeCodeForToken, buildAuthorizationUrl, refreshTandaToken } from '../tanda/client';
 import { TandaTokenResponse, TandaUser } from '../tanda/types';
+import { openRefreshToken, sealRefreshToken } from './refreshToken';
 
 // In-memory session store (replace with Redis/DB in production)
 interface SessionData {
   state: string;
   createdAt: number;
+  lastUsedAt?: number;
   userId?: number;
   accessToken?: string;
   refreshToken?: string;
@@ -18,9 +20,24 @@ interface SessionData {
   clientRedirectUri?: string;
   clientState?: string;
   clientCodeChallenge?: string;
+  /** In-flight Tanda token refresh; Tanda refresh tokens are single-use, so only one runs at a time */
+  refreshing?: Promise<void>;
 }
 
 const sessions = new Map<string, SessionData>();
+
+/** Lifetime of the access token (JWT) issued to MCP clients by POST /token. */
+export const MCP_ACCESS_TOKEN_TTL_SECONDS = 60 * 60;
+// Refresh Tanda before issuing tokens if its access token would expire within this window,
+// so it never expires while an issued access token is live and the sealed refresh token stays current.
+const TANDA_MIN_REMAINING_MS = (MCP_ACCESS_TOKEN_TTL_SECONDS + 15 * 60) * 1000;
+
+// jti of MCP refresh tokens already exchanged (until they expire); a used token is refused.
+const usedRefreshTokens = new Map<string, number>();
+setInterval(() => {
+  const now = Date.now();
+  for (const [jti, exp] of usedRefreshTokens.entries()) if (exp <= now) usedRefreshTokens.delete(jti);
+}, 60 * 60 * 1000).unref();
 
 // Authorization code store (code -> sessionId mapping for OAuth2 flow)
 interface AuthCodeData {
@@ -42,12 +59,12 @@ setInterval(() => {
   }
 }, 60 * 1000).unref(); // Run every minute
 
-// Session cleanup interval (remove expired sessions)
+// Session cleanup interval (remove sessions idle for 24 hours)
 const SESSION_TTL_MS = 24 * 60 * 60 * 1000; // 24 hours
 setInterval(() => {
   const now = Date.now();
   for (const [sessionId, session] of sessions.entries()) {
-    if (now - session.createdAt > SESSION_TTL_MS) {
+    if (now - (session.lastUsedAt ?? session.createdAt) > SESSION_TTL_MS) {
       sessions.delete(sessionId);
       logger.debug(`Cleaned up expired session: ${sessionId}`);
     }
@@ -84,6 +101,14 @@ export function isAllowedRedirectUri(uri: unknown): boolean {
   } catch {
     return false;
   }
+}
+
+/** True when Tanda refused the grant itself (revoked, expired, wrong user), not a transient failure. */
+function isTandaAuthFailure(error: unknown): boolean {
+  if (error instanceof TandaApiError) return error.statusCode === 401 || error.statusCode === 403;
+  const status = (error as { response?: { status?: number } })?.response?.status;
+  if (status === 400 || status === 401 || status === 403) return true;
+  return error instanceof Error && !(error as { isAxiosError?: boolean }).isAxiosError;
 }
 
 export class OAuthManager {
@@ -256,7 +281,7 @@ export class OAuthManager {
   }
 
   // Generate JWT token
-  private generateJWT(sessionId: string, user: TandaUser): string {
+  private generateJWT(sessionId: string, user: TandaUser, expiresIn: string | number = config.JWT_EXPIRY): string {
     const payload: JWTPayload = {
       sessionId,
       userId: user.id,
@@ -264,8 +289,104 @@ export class OAuthManager {
     };
 
     return jwt.sign(payload, config.JWT_SECRET, {
-      expiresIn: config.JWT_EXPIRY,
+      expiresIn,
     } as jwt.SignOptions);
+  }
+
+  /**
+   * Refresh the session's Tanda tokens, once at a time. Tanda refresh tokens are single-use,
+   * so concurrent callers wait for the refresh in flight. A caller whose access token has
+   * already been replaced gets the current one without refreshing again.
+   */
+  async refreshSessionTokens(sessionId: string, failedAccessToken?: string): Promise<string> {
+    const session = sessions.get(sessionId);
+    if (!session?.accessToken) throw new Error('Session not found');
+    while (session.refreshing) await session.refreshing;
+    if (failedAccessToken && session.accessToken !== failedAccessToken) return session.accessToken;
+    if (!session.refreshToken) throw new Error('Session has no Tanda refresh token');
+
+    session.refreshing = (async () => {
+      const tokens = await refreshTandaToken(session.refreshToken!);
+      session.accessToken = tokens.access_token;
+      session.refreshToken = tokens.refresh_token;
+      session.tokenExpiresAt = Date.now() + tokens.expires_in * 1000;
+    })();
+    try {
+      await session.refreshing;
+    } finally {
+      session.refreshing = undefined;
+    }
+    return session.accessToken;
+  }
+
+  /**
+   * Issue an MCP access token (1 hour) and a sealed refresh token for a signed-in session.
+   * Tanda is refreshed first if its token would lapse while the access token is live, so
+   * the sealed copy of the Tanda tokens is current when issued.
+   */
+  async issueMcpTokens(sessionId: string): Promise<{ accessToken: string; refreshToken: string; expiresIn: number }> {
+    const session = sessions.get(sessionId);
+    if (!session?.user || !session.accessToken) throw new Error('Session not found');
+    if (session.refreshToken && (!session.tokenExpiresAt || session.tokenExpiresAt - Date.now() < TANDA_MIN_REMAINING_MS)) {
+      await this.refreshSessionTokens(sessionId);
+    }
+    return {
+      accessToken: this.generateJWT(sessionId, session.user, MCP_ACCESS_TOKEN_TTL_SECONDS),
+      refreshToken: sealRefreshToken({
+        sid: sessionId,
+        uid: session.user.id,
+        at: session.accessToken,
+        rt: session.refreshToken,
+        atExp: session.tokenExpiresAt,
+      }),
+      expiresIn: MCP_ACCESS_TOKEN_TTL_SECONDS,
+    };
+  }
+
+  /**
+   * refresh_token grant for POST /token. Each refresh token works once and is replaced.
+   * If the server restarted, the session is rebuilt from the Tanda tokens sealed inside it.
+   */
+  async exchangeRefreshToken(refreshToken: unknown): Promise<{ success: boolean; accessToken?: string; refreshToken?: string; expiresIn?: number; error?: string; retryable?: boolean }> {
+    const claims = openRefreshToken(refreshToken);
+    if (!claims) return { success: false, error: 'Invalid or expired refresh token' };
+    if (usedRefreshTokens.has(claims.jti)) {
+      logger.warn(`Refresh token reused for session: ${claims.sid}`);
+      return { success: false, error: 'Refresh token already used' };
+    }
+    usedRefreshTokens.set(claims.jti, claims.exp);
+
+    let session = sessions.get(claims.sid);
+    if (session?.accessToken && session.userId !== undefined && session.userId !== claims.uid) {
+      return { success: false, error: 'Refresh token does not match the session' };
+    }
+    if (!session?.accessToken) {
+      session = { state: '', createdAt: Date.now(), userId: claims.uid, accessToken: claims.at, refreshToken: claims.rt, tokenExpiresAt: claims.atExp };
+      sessions.set(claims.sid, session);
+      logger.info(`Session restored from refresh token: ${claims.sid}`);
+    }
+
+    try {
+      // Confirms the Tanda grant is still valid (and refreshes it if it lapsed) before issuing tokens.
+      const client = this.getTandaClient(claims.sid);
+      if (!client) throw new Error('Session not found');
+      const user = await client.getCurrentUser();
+      if (user.id !== claims.uid) throw new Error('Tanda user does not match the refresh token');
+      session.user = user;
+      session.userId = user.id;
+      const tokens = await this.issueMcpTokens(claims.sid);
+      logger.info(`Refresh token exchanged for session: ${claims.sid}`);
+      return { success: true, ...tokens };
+    } catch (error) {
+      logger.warn(`Refresh token exchange failed for session ${claims.sid}: ${describeError(error)}`);
+      if (!isTandaAuthFailure(error)) {
+        // Tanda unreachable or erroring: keep the session and let the client retry this token.
+        usedRefreshTokens.delete(claims.jti);
+        return { success: false, retryable: true, error: 'Tanda is unavailable; try again shortly' };
+      }
+      sessions.delete(claims.sid);
+      return { success: false, error: 'Tanda access was revoked or expired; sign in again' };
+    }
   }
 
   // Verify JWT and return session
@@ -290,11 +411,13 @@ export class OAuthManager {
     if (!session?.accessToken) {
       return null;
     }
+    session.lastUsedAt = Date.now();
 
     return new TandaClient(
       session.accessToken,
       session.refreshToken,
-      session.tokenExpiresAt ? Math.floor((session.tokenExpiresAt - Date.now()) / 1000) : undefined
+      session.tokenExpiresAt ? Math.floor((session.tokenExpiresAt - Date.now()) / 1000) : undefined,
+      { refresh: (failed) => this.refreshSessionTokens(sessionId, failed) }
     );
   }
 
@@ -336,7 +459,7 @@ export class OAuthManager {
   }
 
   // Exchange authorization code for JWT (for Claude MCP /token endpoint)
-  exchangeAuthCode(code: string, codeVerifier?: string): { success: boolean; accessToken?: string; error?: string } {
+  async exchangeAuthCode(code: string, codeVerifier?: string): Promise<{ success: boolean; accessToken?: string; refreshToken?: string; expiresIn?: number; error?: string }> {
     const authCodeData = authCodes.get(code);
 
     if (!authCodeData) {
@@ -389,11 +512,14 @@ export class OAuthManager {
       return { success: false, error: 'Session not found' };
     }
 
-    // Generate JWT for the client
-    const accessToken = this.generateJWT(authCodeData.sessionId, session.user);
-
-    logger.info(`Auth code exchanged for session: ${authCodeData.sessionId}`);
-    return { success: true, accessToken };
+    try {
+      const tokens = await this.issueMcpTokens(authCodeData.sessionId);
+      logger.info(`Auth code exchanged for session: ${authCodeData.sessionId}`);
+      return { success: true, ...tokens };
+    } catch (error) {
+      logger.warn(`Auth code exchange failed for session ${authCodeData.sessionId}: ${describeError(error)}`);
+      return { success: false, error: 'Tanda access could not be confirmed; sign in again' };
+    }
   }
 }
 
