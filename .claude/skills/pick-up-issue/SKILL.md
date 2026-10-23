@@ -75,6 +75,10 @@ branch = one PR. Production only ever receives what passed on staging.
   points at production).
 - Close each issue with a comment linking the staging and production evidence.
   (`Closes #N` only auto-closes when a PR merges into `main`.)
+- Close an issue only when the problem the user sees is gone in production, not when
+  the code change merges. A workaround (failing soft, a warning, a clearer error) is
+  not a fix: if production still shows the symptom (for example a `missing scope`
+  warning), leave the issue open and link the issue that fixes the cause.
 
 ## Stop and ask Hakeem when
 
