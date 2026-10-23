@@ -1,11 +1,12 @@
 import { Tool } from './types';
 import { ArgError, num } from '../args';
-import { loadOrg, loadPeople } from '../context';
+import { loadOrg, loadPeople, orgFrom, peopleFrom } from '../context';
 import { guardResponse } from '../guard';
-import { Rec, TandaApiError } from '../../tanda/client';
+import { Rec } from '../../tanda/client';
 import { addDays, parseLocalDateTime, round2, toUnixSeconds, toZonedDate, toZonedISO, weekStart } from '../../utils/time';
 import { itemHours } from '../../tanda/normalize';
 import { Interval, overlaps } from './intervals';
+import { soft, Warning, withWarnings } from '../warnings';
 
 const MAX_PROPOSALS = 50;
 
@@ -52,7 +53,9 @@ export const validateScheduleTool: Tool = {
     const maxShift = num(args.max_shift_hours, 12) as number;
     const maxWeek = num(args.max_weekly_hours, 40) as number;
 
-    const org = await loadOrg(client);
+    // Each check fails soft: a missing scope skips that check and adds a warning.
+    const warnings: Warning[] = [];
+    const org = await soft(warnings, 'site_lookup', orgFrom([], []), () => loadOrg(client));
     const proposals: Proposal[] = (input as Rec[]).map((p, index) => {
       const dept = num(p.department_id ?? p.supervisor_department_id) ?? null;
       return {
@@ -72,25 +75,26 @@ export const validateScheduleTool: Tool = {
     let existing: Rec[] = [];
     let leave: Rec[] = [];
     let unavailable: Rec[] = [];
-    let unavailabilityChecked = true;
-    const people = await loadPeople(client);
+    let people = peopleFrom([]);
+    let peopleChecked = true;
     if (dates.length) {
       // Cover whole weeks so weekly-hour totals include existing shifts
       const from = weekStart(dates[0]);
       const to = addDays(weekStart(dates[dates.length - 1]), 6);
       const userIds = [...new Set(valid.map((p) => p.user_id).filter((u): u is number => u !== null))];
-      [existing, leave, unavailable] = await Promise.all([
-        client.getSchedules({ from, to, user_ids: userIds }),
-        client.getLeaveRequests({ from, to, user_ids: userIds }),
-        // OAuth tokens usually lack the unavailability scope; validate the rest without it.
-        client.getUnavailability({ from, to, user_ids: userIds }).catch((error) => {
-          if (error instanceof TandaApiError && error.statusCode === 403) {
-            unavailabilityChecked = false;
-            return [];
-          }
-          throw error;
-        }),
+      const rosterWarnings: Warning[] = [];
+      [existing, leave, unavailable, people] = await Promise.all([
+        soft(rosterWarnings, 'roster_conflicts', [] as Rec[], () => client.getSchedules({ from, to, user_ids: userIds })),
+        soft(warnings, 'leave', [] as Rec[], () => client.getLeaveRequests({ from, to, user_ids: userIds })),
+        soft(warnings, 'unavailability', [] as Rec[], () => client.getUnavailability({ from, to, user_ids: userIds })),
+        soft(warnings, 'active_user', peopleFrom([]), () => loadPeople(client)),
       ]);
+      // Without the roster, the weekly total only counts the proposed shifts.
+      for (const w of rosterWarnings) warnings.push(w, { ...w, check: 'weekly_hours', reason: `${w.reason} (existing rostered hours not counted)` });
+      peopleChecked = !warnings.some((w) => w.check === 'active_user');
+    } else {
+      people = await soft(warnings, 'active_user', peopleFrom([]), () => loadPeople(client));
+      peopleChecked = !warnings.some((w) => w.check === 'active_user');
     }
 
     const weekly = new Map<string, number>();
@@ -103,20 +107,20 @@ export const validateScheduleTool: Tool = {
 
     for (const p of proposals) {
       const errors: string[] = [];
-      const warnings: string[] = [];
+      const issues: string[] = [];
       if (!p.user_id) errors.push('user_id missing');
-      else if (!people.byId.has(p.user_id)) warnings.push('user is not an active user');
+      else if (peopleChecked && !people.byId.has(p.user_id)) issues.push('user is not an active user');
       if (p.start === null || p.finish === null) errors.push('start/finish not parseable');
-      if (p.department_id !== null && !org.departmentById.has(p.department_id)) errors.push(`department ${p.department_id} not found`);
-      if (p.department_id === null && p.location_id === null) warnings.push('no department_id/location_id given');
-      if (p.location_id !== null && org.isBookkeepingLocation(p.location_id)) warnings.push('bookkeeping site (not a real work site)');
+      if (p.department_id !== null && org.departments.length && !org.departmentById.has(p.department_id)) errors.push(`department ${p.department_id} not found`);
+      if (p.department_id === null && p.location_id === null) issues.push('no department_id/location_id given');
+      if (p.location_id !== null && org.isBookkeepingLocation(p.location_id)) issues.push('bookkeeping site (not a real work site)');
 
       if (p.start !== null && p.finish !== null && p.user_id) {
         const span: Interval = [p.start, p.finish];
         const hours = (p.finish - p.start) / 3600;
         if (p.finish === p.start) errors.push('zero-length shift (start == finish)');
         else if (p.finish < p.start) errors.push('finish is before start');
-        if (hours > maxShift) warnings.push(`${round2(hours)}h exceeds ${maxShift}h shift limit`);
+        if (hours > maxShift) issues.push(`${round2(hours)}h exceeds ${maxShift}h shift limit`);
 
         const clash = existing.find((s) => s.user_id === p.user_id && toUnixSeconds(s.start) !== null && toUnixSeconds(s.finish) !== null &&
           overlaps(span, [toUnixSeconds(s.start) as number, toUnixSeconds(s.finish) as number]));
@@ -137,14 +141,14 @@ export const validateScheduleTool: Tool = {
           const us = toUnixSeconds(u.start);
           const uf = toUnixSeconds(u.finish);
           if (u.user_id === p.user_id && us !== null && uf !== null && overlaps(span, [us, uf])) {
-            warnings.push(`marked unavailable ${toZonedISO(us)} - ${toZonedISO(uf)}`);
+            issues.push(`marked unavailable ${toZonedISO(us)} - ${toZonedISO(uf)}`);
           }
         }
 
         const k = `${p.user_id}|${weekStart(startDate)}`;
         const total = (weekly.get(k) || 0) + Math.max(0, hours);
         weekly.set(k, total);
-        if (total > maxWeek) warnings.push(`week of ${weekStart(startDate)} totals ${round2(total)}h (> ${maxWeek}h)`);
+        if (total > maxWeek) issues.push(`week of ${weekStart(startDate)} totals ${round2(total)}h (> ${maxWeek}h)`);
       }
 
       results.push({
@@ -158,7 +162,7 @@ export const validateScheduleTool: Tool = {
         hours: p.start !== null && p.finish !== null ? round2(Math.max(0, p.finish - p.start) / 3600) : null,
         ok: errors.length === 0,
         errors,
-        warnings,
+        warnings: issues,
       });
     }
 
@@ -168,11 +172,11 @@ export const validateScheduleTool: Tool = {
         ok: results.filter((r) => r.ok && (r.warnings as string[]).length === 0).length,
         with_warnings: results.filter((r) => r.ok && (r.warnings as string[]).length > 0).length,
         with_errors: results.filter((r) => !r.ok).length,
-        note: unavailabilityChecked
-          ? 'Validation only; nothing was written to Tanda.'
-          : 'Validation only; nothing was written to Tanda. Unavailability was not checked: this connection lacks the unavailability scope.',
+        ...(warnings.length ? { checks_skipped: [...new Set(warnings.map((w) => w.check))] } : {}),
+        note: 'Validation only; nothing was written to Tanda.',
       },
-      results
+      results,
+      { extra: withWarnings(warnings) }
     );
   },
 };

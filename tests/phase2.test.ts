@@ -275,7 +275,7 @@ describe('tanda_validate_schedule', () => {
       shifts: [{ user_id: 1, start: `${day} 10:00`, finish: `${day} 14:00` }],
     })).content as Content;
     expect([...(res.rows[0].errors as string[]), ...(res.rows[0].warnings as string[])].join('; ')).toMatch(/overlaps existing schedule 50/);
-    expect(res.summary.note).toMatch(/Unavailability was not checked/);
+    expect((res as unknown as { warnings: unknown[] }).warnings).toEqual([{ check: 'unavailability', reason: 'missing scope: unavailability' }]);
   });
 });
 
