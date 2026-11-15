@@ -20,7 +20,8 @@ if (!token) {
   console.error('Set MCP_TOKEN (the server\'s MCP_SHARED_SECRET).');
   process.exit(2);
 }
-const runId = (process.env.SMOKE_RUN_ID || new Date().toISOString().replace(/\D/g, '').slice(0, 14)).toLowerCase().replace(/[^a-z0-9]/g, '');
+const timestamp = new Date().toISOString().replace(/\D/g, '').slice(0, 14); // e.g. 20261115154200
+const runId = (process.env.SMOKE_RUN_ID || timestamp).toLowerCase().replace(/[^a-z0-9]/g, '');
 const email = `zz.mcp.smoke.${runId}@example.com`;
 const name = `ZZ MCP Smoke ${runId}`;
 const sourceRef = process.env.SMOKE_REF || `smoke-writes ${new Date().toISOString().slice(0, 10)}`;
