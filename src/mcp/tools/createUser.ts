@@ -123,10 +123,6 @@ export const createUserTool: Tool = {
     const payload = buildCreatePayload(args);
     const sendInvite = bool(args.send_invite);
     const sourceRef = text(args.source_ref, 'source_ref', 100);
-    // ADR 0001: under the shared identity, name the decision this write carries out
-    if (client.isSharedIdentity && !sourceRef) {
-      throw new ArgError(`${CREATE_USER_TOOL} needs source_ref (e.g. the Monday item id) when called with the shared server token. See docs/adr/0001-write-tool-identity.md.`);
-    }
     const token = typeof args.confirm_token === 'string' && args.confirm_token.trim() ? args.confirm_token.trim() : undefined;
     const dryRun = bool(args.dry_run, !token);
     const warnings: Warning[] = [];

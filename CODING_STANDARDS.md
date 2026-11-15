@@ -16,9 +16,7 @@ Judgement calls for reviewers, human or Claude. Anything a tool can check
   write verb to the Tanda API, except the allowlist in `src/config/writes.ts`
   (#84, #88, #86). That allowlist is gated by `TANDA_WRITES_ENABLED` and used
   only by `tanda_create_user`, `tanda_deactivate_user` and
-  `tanda_approve_timesheets`. A new write tool follows
-  `docs/adr/0001-write-tool-identity.md`: it either needs a personal identity
-  or, under the shared identity, needs `source_ref`. Widening it needs a change to
+  `tanda_approve_timesheets`. Widening it needs a change to
   `docs/SECURITY.md` and the owner's sign-off.
 - **Personal data stays filtered.** Payloads go through the privacy filters in
   `src/mcp/privacy.ts`; new sensitive fields are added to them, not exposed by

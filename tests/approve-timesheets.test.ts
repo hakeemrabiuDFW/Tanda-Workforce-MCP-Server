@@ -113,7 +113,7 @@ describe('tanda_approve_timesheets', () => {
     const res = await run(client, { ...args, confirm_token: preview.content.confirm_token });
     expect(res.isError).toBeFalsy();
     expect(res.content.summary).toMatchObject({ status: 'applied', succeeded: 2, failed: 0 });
-    expect(res.content.rows[0]).toMatchObject({ previous_status: 'pending', new_status: 'approved' });
+    expect(res.content.rows[0]).toMatchObject({ previous_status: 'pending', new_status: 'approved', hours: 8, cost: expect.any(Number) });
     expect(writes(requests).map((r) => [r.path, r.body])).toEqual([
       ['/timesheets/1', { status: 'approved' }],
       ['/shifts/201', { finish: nySeconds('2026-08-12', '15:00'), metadata: expect.stringContaining('missing clock-out, filled from roster') }],

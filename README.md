@@ -11,8 +11,6 @@ A read-only MCP (Model Context Protocol) server for the Tanda / Workforce.com AP
 
 See [docs/SECURITY.md](docs/SECURITY.md).
 
-Which Tanda identity each write tool may run as is set by [ADR 0001](docs/adr/0001-write-tool-identity.md).
-
 ## Tools (12)
 
 Every list tool returns `{ summary, rows, page }`. `rows` holds at most 50 entries and the whole response is at most 25 KB. When rows are cut, the response sets `truncated: true` and includes `page.next_offset` and a `how_to_page` hint. Time fields come as unix seconds plus `*_iso` strings in `America/New_York`, and `hours` is a decimal. `from`/`to` ranges up to 62 days are split into 7-day Tanda calls internally.
@@ -39,11 +37,11 @@ Only listed and callable when `TANDA_WRITES_ENABLED=true`. It creates a plain em
 1. Call with `name`, `email` and optionally `phone`, `employment_start_date`, `department_ids`, `award_template_id` (default 42, or `TANDA_DEFAULT_AWARD_TEMPLATE_ID`), `send_invite` and `source_ref` (e.g. the Monday item id). Nothing is created. The response is `status: "preview"` with the exact `payload` and a `confirm_token` valid for 15 minutes. Add `fields: ["email","phone"]` to see those in the preview.
 2. Call again with the same arguments plus `confirm_token`. The response is `status: "created"` with `user_id`, the user as `tanda_people` returns it, and `invite` (`not_requested`, `sent` or `failed`; a failed invite is a warning, not an error).
 
-The token is bound to the arguments and to the Tanda identity that asked for the preview. Changed arguments, another identity or an expired token are refused. Both calls first check for duplicates among active and inactive users. A user with the same email, or with the same name and start date, returns `status: "exists"` with `existing_user_id` and creates nothing. Unknown `department_ids` are refused. Only the `employee` level can be set, and wage, date of birth, passcode, tax, bank and role fields are never sent. Each creation is logged with the new user id, the caller's Tanda user id and `source_ref`. Calls made with the shared server token (scheduled tasks) must pass `source_ref`; see [ADR 0001](docs/adr/0001-write-tool-identity.md).
+The token is bound to the arguments and to the Tanda identity that asked for the preview. Changed arguments, another identity or an expired token are refused. Both calls first check for duplicates among active and inactive users. A user with the same email, or with the same name and start date, returns `status: "exists"` with `existing_user_id` and creates nothing. Unknown `department_ids` are refused. Only the `employee` level can be set, and wage, date of birth, passcode, tax, bank and role fields are never sent. Each creation is logged with the new user id, the caller's Tanda user id and `source_ref`.
 
 ### Deactivating employees (`tanda_deactivate_user`, off by default)
 
-Tanda's `DELETE /users/{id}` does not erase anyone. It marks the user inactive, and Tanda's rehire reverses it. Use this tool to remove test hires and leavers from the active, billed headcount. It works in the same two steps as `tanda_create_user`: call with `user_id` (plus `source_ref`, which is required under the shared server token; see [ADR 0001](docs/adr/0001-write-tool-identity.md)) to preview the user and get a `confirm_token`, then repeat the call with the token. An inactive user returns `status: "already_inactive"`. The tool refuses anyone with a level other than `employee`, and it refuses the caller's own account; it fails closed if the caller can't be identified. Each deactivation is logged with the user id, the caller and `source_ref`.
+Tanda's `DELETE /users/{id}` does not erase anyone. It marks the user inactive, and Tanda's rehire reverses it. Use this tool to remove test hires and leavers from the active, billed headcount. It works in the same two steps as `tanda_create_user`: call with `user_id` (and optionally `source_ref`) to preview the user and get a `confirm_token`, then repeat the call with the token. An inactive user returns `status: "already_inactive"`. The tool refuses anyone with a level other than `employee`, and it refuses the caller's own account; it fails closed if the caller can't be identified. Each deactivation is logged with the user id, the caller and `source_ref`.
 
 ### Approving timesheets (`tanda_approve_timesheets`, off by default)
 

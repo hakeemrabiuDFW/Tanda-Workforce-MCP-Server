@@ -211,7 +211,6 @@ export const approveTimesheetsTool: Tool = {
     if (!writesEnabled()) {
       throw new ArgError(`${APPROVE_TIMESHEETS_TOOL} is turned off on this server (TANDA_WRITES_ENABLED is not true). Nothing was changed.`);
     }
-    // ADR 0001: approving is a judgment, so Tanda must record a person
     if (client.isSharedIdentity) {
       throw new ArgError(`${APPROVE_TIMESHEETS_TOOL} needs a person's own Tanda login (OAuth), so Tanda records who approved. The shared server token can't approve.`);
     }
@@ -266,10 +265,10 @@ export const approveTimesheetsTool: Tool = {
       try {
         for (const c of p.shift_changes) await client.updateShift(c.shift_id, { finish: c.finish, metadata: c.metadata });
         await client.setTimesheetStatus(p.timesheet_id, action === 'approve' ? 'approved' : 'pending');
-        results.push({ timesheet_id: p.timesheet_id, user_name: p.user_name, outcome: p.new_status, previous_status: p.status, new_status: p.new_status, flags: p.flags, shift_updates: p.shift_changes.length });
+        results.push({ timesheet_id: p.timesheet_id, user_name: p.user_name, outcome: p.new_status, previous_status: p.status, new_status: p.new_status, hours: p.hours, cost: p.cost, flags: p.flags, shift_updates: p.shift_changes.length });
       } catch (error) {
         const reason = writeFailureReason(error, 'unexpected error; check server logs');
-        results.push({ timesheet_id: p.timesheet_id, user_name: p.user_name, outcome: 'failed', previous_status: p.status, new_status: p.status, reason, flags: p.flags });
+        results.push({ timesheet_id: p.timesheet_id, user_name: p.user_name, outcome: 'failed', previous_status: p.status, new_status: p.status, hours: p.hours, cost: p.cost, reason, flags: p.flags });
       }
     }
     const ok = results.filter((r) => r.outcome !== 'failed');
