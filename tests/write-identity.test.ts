@@ -37,10 +37,20 @@ describe('ADR 0001 write identity', () => {
     expect(res.isError).toBeFalsy();
   });
 
-  it('tanda_approve_timesheets refuses the shared identity even with source_ref', async () => {
-    const shared = fakeTanda(routes(), { sharedIdentity: true }).client;
-    const res = await executeTool(shared, 'tanda_approve_timesheets', { from: '2026-08-10', to: '2026-08-23', source_ref: 'x' });
-    expect(res.isError).toBe(true);
-    expect(JSON.stringify(res.content)).toContain("person's own Tanda login");
+  it('tanda_approve_timesheets lets the shared identity preview but never apply', async () => {
+    const sheet = { id: 1, user_id: 10, status: 'pending', start: '2026-08-10', finish: '2026-08-23', shifts: [{ id: 5, user_id: 10, date: '2026-08-11', start: 1786453200, finish: 1786482000, award_interpretation: [{ units: 8 }] }] };
+    const extra = [[/^\/timesheets\/on\//, () => [sheet]], ['/departments', () => []], ['/locations', () => []]] as Parameters<typeof fakeTanda>[0];
+    const { client, requests } = fakeTanda([...extra, ...routes()], { sharedIdentity: true });
+    const args = { from: '2026-08-10', to: '2026-08-23', allow_past_period: true, source_ref: 'x' };
+    const preview = await executeTool(client, 'tanda_approve_timesheets', args);
+    expect(preview.isError).toBeFalsy();
+    const body = preview.content as Record<string, unknown>;
+    expect((body.summary as Record<string, unknown>).status).toBe('preview');
+    expect(body.confirm_token).toBeUndefined();
+    expect(String(body.next_step)).toContain("person's own Tanda login");
+    const apply = await executeTool(client, 'tanda_approve_timesheets', { ...args, confirm_token: '1.x' });
+    expect(apply.isError).toBe(true);
+    expect(JSON.stringify(apply.content)).toContain("person's own Tanda login");
+    expect(requests.filter((r) => r.method !== 'GET')).toHaveLength(0);
   });
 });

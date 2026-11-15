@@ -1,6 +1,7 @@
 #!/usr/bin/env node
 /**
- * Smoke test: calls all 12 v4 tools on a running server and prints shape + size only.
+ * Smoke test: calls all 12 v4 tools and the two staffing app tools on a running server and
+ * prints shape + size only.
  * No row values are printed, so no PII reaches the terminal.
  *
  *   MCP_URL=https://<host>/mcp MCP_TOKEN=<MCP_SHARED_SECRET or OAuth JWT> node scripts/smoke.mjs [from] [to]
@@ -49,6 +50,9 @@ const calls = [
   ['tanda_exceptions', range],
   ['tanda_export_preview', { date: to }],
   ['tanda_change_history', null], // filled from tanda_timesheets
+  // MCP App tools: the data is in structuredContent, the text is a summary
+  ['conversation_to_site_schedule', { site_name: 'Smoke test site' }],
+  ['staff_allocation_board', { cleaners_needed: 2 }],
 ];
 
 const listed = (await rpc('tools/list', {})).result?.tools?.map((t) => t.name) || [];
@@ -69,7 +73,8 @@ for (const [name, preset] of calls) {
   const t0 = Date.now();
   const out = await rpc('tools/call', { name, arguments: args });
   const ms = Date.now() - t0;
-  const text = out.result?.content?.[0]?.text ?? JSON.stringify(out.error ?? {});
+  const structured = out.result?.structuredContent;
+  const text = structured ? JSON.stringify(structured) : out.result?.content?.[0]?.text ?? JSON.stringify(out.error ?? {});
   const bytes = Buffer.byteLength(text);
   let body = {};
   try { body = JSON.parse(text); } catch { /* non-JSON */ }

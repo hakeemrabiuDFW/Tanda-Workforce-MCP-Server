@@ -67,9 +67,14 @@ describe('tanda_approve_timesheets', () => {
     expect(writes(requests)).toHaveLength(0);
   });
 
-  it('refuses the shared server identity so Tanda always records a person', async () => {
+  it('lets the shared server identity preview, without a token, and refuses to apply', async () => {
     const { client, requests } = tanda({ shared: true });
-    const res = await run(client, period);
+    const preview = await run(client, period);
+    expect(preview.isError).toBeFalsy();
+    expect(preview.content.summary).toMatchObject({ status: 'preview', will_change: 4 });
+    expect(preview.content.confirm_token).toBeUndefined();
+    const own = await run(tanda().client, period);
+    const res = await run(client, { ...period, confirm_token: own.content.confirm_token });
     expect(res.isError).toBe(true);
     expect(JSON.stringify(res.content)).toContain("person's own Tanda login");
     expect(writes(requests)).toHaveLength(0);

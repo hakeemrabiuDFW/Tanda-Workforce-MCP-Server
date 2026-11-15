@@ -1,12 +1,11 @@
 name: checks
-# Lint, typecheck, tests and build. Called by pr-pipeline.yml on every PR, and
-# run on its own for each push to main. This file is the repo-specific part of
-# the pipeline (it replaces ci.yml).
+# Lint, typecheck, tests and build. Called by pr-pipeline.yml on every PR and by
+# deploy.yml before each staging/production image build, so a deploy runs exactly
+# the checks a PR passed. This file is the repo-specific part of the pipeline
+# (it replaces ci.yml).
 
 on:
   workflow_call:
-  push:
-    branches: [main]
 
 permissions:
   contents: read
@@ -24,6 +23,8 @@ jobs:
           node-version: 20
           cache: npm
       - run: npm ci
+      # The MCP App view tests render the pages in headless Chromium
+      - run: npx playwright install --with-deps chromium
       - run: npm run lint
       - run: npx tsc --noEmit
       - run: npm test -- --ci
