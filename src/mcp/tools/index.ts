@@ -16,6 +16,8 @@ import { validateScheduleTool } from './validate';
 import { exceptionsTool } from './exceptions';
 import { exportPreviewTool } from './exportPreview';
 import { changeHistoryTool } from './changeHistory';
+import { createUserTool, CREATE_USER_TOOL } from './createUser';
+import { writesEnabled } from '../../config/writes';
 import { ALIAS_NAMES, resolveAlias, V3_ALIASES } from './aliases';
 
 export type MCPTool = ToolDefinition;
@@ -34,6 +36,7 @@ export const TOOLS: Tool[] = [
   exceptionsTool,
   exportPreviewTool,
   changeHistoryTool,
+  createUserTool,
 ];
 
 const byName = new Map(TOOLS.map((t) => [t.name, t]));
@@ -43,13 +46,15 @@ export const tandaTools: MCPTool[] = TOOLS.map(({ name, description, inputSchema
 
 /** Deprecated names are callable but not listed, unless MCP_LIST_ALIASES=true. */
 export function getAvailableTools(): MCPTool[] {
-  if (process.env.MCP_LIST_ALIASES !== 'true') return tandaTools;
+  // The write tool is only listed where writes are switched on (it refuses to run otherwise)
+  const tools = writesEnabled() ? tandaTools : tandaTools.filter((t) => t.name !== CREATE_USER_TOOL);
+  if (process.env.MCP_LIST_ALIASES !== 'true') return tools;
   const aliases: MCPTool[] = Object.keys(V3_ALIASES).map((name) => ({
     name,
     description: `Deprecated alias kept for one release; use the v4 tools instead.`,
     inputSchema: { type: 'object', properties: {} },
   }));
-  return [...tandaTools, ...aliases];
+  return [...tools, ...aliases];
 }
 
 export function isKnownTool(name: string): boolean {

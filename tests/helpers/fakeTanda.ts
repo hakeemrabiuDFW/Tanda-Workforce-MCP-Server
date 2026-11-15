@@ -6,6 +6,7 @@ export interface RecordedRequest {
   path: string;
   params: Record<string, string>;
   headers: Record<string, unknown>;
+  body?: unknown;
 }
 
 export type RouteHandler = (req: RecordedRequest) => unknown | { __status: number; __headers?: Record<string, string>; body?: unknown };
@@ -40,6 +41,7 @@ export function fakeTanda(routes: Array<[string | RegExp, RouteHandler]>) {
       path: url.pathname,
       params,
       headers: { ...(config.headers || {}) },
+      body: typeof config.data === 'string' ? JSON.parse(config.data) : config.data,
     };
     requests.push(req);
 
