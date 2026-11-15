@@ -16,6 +16,8 @@ export const UPDATABLE_FIELDS = ['hourly_rate', 'award_template_id', 'employment
 type Field = (typeof UPDATABLE_FIELDS)[number];
 
 export const MAX_UPDATES = 50;
+/** Arguments that steer the call rather than change the user. */
+const CALL_ARGS = new Set(['user_id', 'updates', 'source_ref', 'dry_run', 'confirm_token', 'limit', 'offset', 'fields', 'show_wages']);
 export const MAX_HOURLY_RATE = 100;
 /** A rate change bigger than this (vs the current rate) is flagged in the preview, not refused. */
 const RATE_CHANGE_FLAG = 0.25;
@@ -77,6 +79,8 @@ export function parseUpdates(args: Args): UserUpdate[] {
       return { user_id: requireId(rec.user_id, `updates[${i}].user_id`), changes: parseChanges(rec, `updates[${i}].`) };
     });
   } else {
+    const unknown = Object.keys(args).filter((k) => !CALL_ARGS.has(k) && !(UPDATABLE_FIELDS as readonly string[]).includes(k));
+    if (unknown.length) throw new ArgError(`This tool can't change: ${unknown.join(', ')}. Allowed: ${UPDATABLE_FIELDS.join(', ')}.`);
     list = [{ user_id: requireId(args.user_id, 'user_id'), changes: parseChanges(args, '') }];
   }
   const seen = new Set<number>();

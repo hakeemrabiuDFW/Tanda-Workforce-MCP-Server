@@ -25,7 +25,7 @@ Shared-secret auth is off unless both variables are set. The comparison is const
 
 Which identity each write runs as is decided in [ADR 0001](adr/0001-write-tool-identity.md).
 
-The server does not write to Tanda, with three exceptions: creating users (#84), deactivating them (#88) and approving timesheets (#86).
+The server does not write to Tanda, with four exceptions: creating users (#84), deactivating them (#88), updating their pay rate and similar fields (#94) and approving timesheets (#86).
 
 - The Tanda HTTP client rejects any verb other than `GET`/`HEAD` before the request leaves the process. The only exceptions are `POST /users`, `POST /users/{id}/invite`, `DELETE /users/{id}`, `PUT /users/{id}`, `PUT /timesheets/{id}` and `PUT /shifts/{id}`, listed in `src/config/writes.ts`. Tanda treats the delete as a deactivation, which rehire reverses. The client only sends `hourly_rate`, `award_template_id`, `employment_start_date`, `department_ids` and `employee_id` to users, only `status` (approved or pending, never exported) to timesheets, and only `finish` and `metadata` to shifts. All of these are refused unless `TANDA_WRITES_ENABLED=true`, which is off by default.
 - The only tools that write are `tanda_create_user`, `tanda_deactivate_user`, `tanda_update_user` and `tanda_approve_timesheets`. None is listed while writes are off. All four need a preview followed by a second call with an HMAC `confirm_token` (`src/mcp/confirm.ts`). The token is signed with `JWT_SECRET`, bound to the tool, the exact arguments and the caller's Tanda token, and valid for 15 minutes.
@@ -33,7 +33,7 @@ The server does not write to Tanda, with three exceptions: creating users (#84),
 - `tanda_deactivate_user` refuses users with any level other than `employee` and refuses the caller's own account. It fails closed if the caller can't be identified.
 - `tanda_update_user` refuses users with any level other than `employee`, inactive users and the caller's own account, and fails closed if the caller can't be identified. It rejects any field outside its five, rates outside 0–100, and more than 50 users per call. Its token covers the exact per-user change set.
 - `tanda_approve_timesheets` refuses the shared server identity, so Tanda records a person as the approver. It never touches exported timesheets and needs `allow_past_period` for periods that ended more than 14 days ago. It changes at most 100 timesheets per call, and its token covers the exact shift and status changes.
-- All three log each change with the user id, the caller and `source_ref`. Writes are never retried after a timeout or 5xx, because the change may already have happened. Only a 401 is retried, after a token refresh.
+- All four log each change with the user id, the caller and `source_ref`. Writes are never retried after a timeout or 5xx, because the change may already have happened. Only a 401 is retried, after a token refresh.
 
 ## Tanda OAuth scopes (least privilege)
 

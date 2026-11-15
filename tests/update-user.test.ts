@@ -123,6 +123,8 @@ describe('tanda_update_user', () => {
     }
     const level = await run(client, { updates: [{ user_id: 500, user_levels: ['manager'] }] });
     expect(JSON.stringify(level.content)).toContain("can't change: user_levels");
+    const single = await run(client, { user_id: 500, hourly_rate: 15.5, user_levels: ['manager'], email: 'x@example.com' });
+    expect(JSON.stringify(single.content)).toContain("can't change: user_levels, email");
     const dup = await run(client, { updates: [{ user_id: 500, hourly_rate: 15 }, { user_id: 500, hourly_rate: 16 }] });
     expect(JSON.stringify(dup.content)).toContain('more than once');
     const tooMany = await run(client, { updates: Array.from({ length: 51 }, (_, i) => ({ user_id: i + 1000, hourly_rate: 15 })) });
