@@ -226,7 +226,8 @@ describe('write allowlist in the Tanda client', () => {
     const axiosInstance = (client as any).client;
     await expect(axiosInstance.post('/schedules', {})).rejects.toThrow(/Read-only/);
     await expect(axiosInstance.put('/users/1', {})).rejects.toThrow(/Read-only/);
-    await expect(axiosInstance.delete('/users/1')).rejects.toThrow(/Read-only/);
+    await expect(axiosInstance.delete('/users/1/alternate_rates')).rejects.toThrow(/Read-only/);
+    await expect(axiosInstance.delete('/schedules/1')).rejects.toThrow(/Read-only/);
     await expect(axiosInstance.post('/users/1/onboard', {})).rejects.toThrow(/Read-only/);
   });
 });

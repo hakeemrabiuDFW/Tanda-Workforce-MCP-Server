@@ -1,10 +1,9 @@
-import crypto from 'crypto';
 import { Tool } from './types';
 import { ArgError, Args, bool, idList, num, text } from '../args';
 import { loadOrg } from '../context';
 import { pickUserFields } from '../privacy';
 import { Warning, withWarnings } from '../warnings';
-import { config } from '../../config/environment';
+import { checkConfirmToken, CONFIRM_TTL_MS, signConfirmToken } from '../confirm';
 import { writesEnabled } from '../../config/writes';
 import { Rec, TandaApiError, TandaClient } from '../../tanda/client';
 import { isDate } from '../../utils/time';
@@ -12,8 +11,6 @@ import { logger } from '../../utils/logger';
 
 export const CREATE_USER_TOOL = 'tanda_create_user';
 
-/** How long a preview's confirm_token stays valid. */
-const TOKEN_TTL_MS = 15 * 60 * 1000;
 /** Only plain employees can be created here; elevated levels stay a manual Tanda change. */
 const ALLOWED_LEVELS = ['employee'];
 const EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
@@ -57,30 +54,6 @@ export function buildCreatePayload(args: Args): Rec {
   payload.award_template_id = award;
   payload.user_levels = levels.map(String);
   return payload;
-}
-
-/** What the confirm_token is bound to: the payload, the invite choice, the audit ref and the caller. */
-function signedMaterial(payload: Rec, sendInvite: boolean, sourceRef: string | undefined, callerScope: string, exp: number): string {
-  return JSON.stringify([exp, callerScope, payload, sendInvite, sourceRef ?? null]);
-}
-
-export function signConfirmToken(payload: Rec, sendInvite: boolean, sourceRef: string | undefined, callerScope: string, now = Date.now()): string {
-  const exp = now + TOKEN_TTL_MS;
-  const mac = crypto.createHmac('sha256', config.JWT_SECRET).update(signedMaterial(payload, sendInvite, sourceRef, callerScope, exp)).digest('hex');
-  return `${exp}.${mac}`;
-}
-
-function checkConfirmToken(token: string, payload: Rec, sendInvite: boolean, sourceRef: string | undefined, callerScope: string): void {
-  const [expRaw, mac] = token.split('.');
-  const exp = Number(expRaw);
-  if (!Number.isFinite(exp) || !mac) throw new ArgError('confirm_token is malformed. Call again without it to get a new preview.');
-  const expected = crypto.createHmac('sha256', config.JWT_SECRET).update(signedMaterial(payload, sendInvite, sourceRef, callerScope, exp)).digest('hex');
-  const a = Buffer.from(mac);
-  const b = Buffer.from(expected);
-  if (a.length !== b.length || !crypto.timingSafeEqual(a, b)) {
-    throw new ArgError('confirm_token does not match these arguments. Send exactly the arguments from the preview, or call again without confirm_token for a new preview.');
-  }
-  if (Date.now() > exp) throw new ArgError('confirm_token has expired (15 minutes). Call again without it for a new preview.');
 }
 
 const normName = (v: unknown) => String(v ?? '').trim().replace(/\s+/g, ' ').toLowerCase();
@@ -167,14 +140,14 @@ export const createUserTool: Tool = {
         created: false,
         payload,
         send_invite: sendInvite,
-        confirm_token: signConfirmToken(payload, sendInvite, sourceRef, client.cacheScope),
-        expires_in_minutes: TOKEN_TTL_MS / 60000,
+        confirm_token: signConfirmToken(CREATE_USER_TOOL, client.cacheScope, [payload, sendInvite, sourceRef ?? null]),
+        expires_in_minutes: CONFIRM_TTL_MS / 60000,
         next_step: 'To create this user, call again with the same arguments plus confirm_token.',
         ...withWarnings(warnings),
       };
     }
 
-    checkConfirmToken(token, payload, sendInvite, sourceRef, client.cacheScope);
+    checkConfirmToken(token, CREATE_USER_TOOL, client.cacheScope, [payload, sendInvite, sourceRef ?? null]);
     const created = await client.createUser(payload);
     const userId = created.id;
     if (typeof userId !== 'number') {

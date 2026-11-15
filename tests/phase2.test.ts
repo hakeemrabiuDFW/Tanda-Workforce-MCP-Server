@@ -34,8 +34,8 @@ beforeAll(() => {
 });
 
 describe('tool surface', () => {
-  it('exposes the 12 v4 read tools plus tanda_create_user', () => {
-    expect(tandaTools.map((t) => t.name)).toEqual([...EXPECTED, 'tanda_create_user']);
+  it('exposes the 12 v4 read tools plus the two write tools', () => {
+    expect(tandaTools.map((t) => t.name)).toEqual([...EXPECTED, 'tanda_create_user', 'tanda_deactivate_user']);
   });
 
   it('has a one-sentence description for every tool', () => {

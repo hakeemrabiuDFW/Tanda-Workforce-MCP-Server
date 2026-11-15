@@ -1,11 +1,13 @@
 /**
- * The one exception to the read-only rule (#84): creating a user and sending their invite.
- * Every other write verb is refused by the Tanda client, and these two are refused too
+ * The only exceptions to the read-only rule: creating a user and sending their invite (#84),
+ * and deactivating a user (#88; Tanda's DELETE /users/{id} only marks them inactive).
+ * Every other write verb is refused by the Tanda client, and these are refused too
  * unless TANDA_WRITES_ENABLED=true. Read at call time so it can be toggled per deploy.
  */
 const ALLOWED_WRITES: Array<{ method: string; path: RegExp }> = [
   { method: 'post', path: /^\/users$/ },
   { method: 'post', path: /^\/users\/\d+\/invite$/ },
+  { method: 'delete', path: /^\/users\/\d+$/ },
 ];
 
 export function writesEnabled(): boolean {

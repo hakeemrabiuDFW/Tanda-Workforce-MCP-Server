@@ -13,9 +13,10 @@ Judgement calls for reviewers, human or Claude. Anything a tool can check
   behind the same auth middleware; nothing widens unauthenticated access
   without a matching change to `docs/SECURITY.md`.
 - **The server stays read-only towards Tanda.** No tool or client path sends a
-  write verb to the Tanda API, except the user-creation allowlist in
-  `src/config/writes.ts` (#84). That allowlist is gated by `TANDA_WRITES_ENABLED`
-  and used only by `tanda_create_user`. Widening it needs a change to
+  write verb to the Tanda API, except the user create/deactivate allowlist
+  in `src/config/writes.ts` (#84, #88). That allowlist is gated by
+  `TANDA_WRITES_ENABLED` and used only by `tanda_create_user` and
+  `tanda_deactivate_user`. Widening it needs a change to
   `docs/SECURITY.md` and the owner's sign-off.
 - **Personal data stays filtered.** Payloads go through the privacy filters in
   `src/mcp/privacy.ts`; new sensitive fields are added to them, not exposed by
