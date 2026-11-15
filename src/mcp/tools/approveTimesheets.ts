@@ -209,6 +209,7 @@ export const approveTimesheetsTool: Tool = {
     if (!writesEnabled()) {
       throw new ArgError(`${APPROVE_TIMESHEETS_TOOL} is turned off on this server (TANDA_WRITES_ENABLED is not true). Nothing was changed.`);
     }
+    // ADR 0001: approving is a judgment, so Tanda must record a person
     if (client.isSharedIdentity) {
       throw new ArgError(`${APPROVE_TIMESHEETS_TOOL} needs a person's own Tanda login (OAuth), so Tanda records who approved. The shared server token can't approve.`);
     }
