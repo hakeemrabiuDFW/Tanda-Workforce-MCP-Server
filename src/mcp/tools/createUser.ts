@@ -8,6 +8,7 @@ import { writesEnabled } from '../../config/writes';
 import { Rec, TandaApiError, TandaClient } from '../../tanda/client';
 import { isDate } from '../../utils/time';
 import { logger } from '../../utils/logger';
+import { parseHourlyRate } from './updateUser';
 
 export const CREATE_USER_TOOL = 'tanda_create_user';
 
@@ -20,8 +21,8 @@ function defaultAwardTemplateId(): number {
 }
 
 /**
- * The exact body sent to POST /users. Only these keys can ever be sent: no wage, DOB,
- * passcode, tax, bank or role fields.
+ * The exact body sent to POST /users. Only these keys can ever be sent: no DOB, passcode,
+ * tax, bank or role fields. hourly_rate is optional (#94) and needs the "cost" scope.
  */
 export function buildCreatePayload(args: Args): Rec {
   const name = text(args.name, 'name', 100);
@@ -41,6 +42,7 @@ export function buildCreatePayload(args: Args): Rec {
     ? defaultAwardTemplateId()
     : num(args.award_template_id);
   if (!award || award <= 0) throw new ArgError('award_template_id must be a positive number.');
+  const rate = parseHourlyRate(args.hourly_rate);
   const levels = args.user_levels === undefined ? ['employee'] : args.user_levels;
   if (!Array.isArray(levels) || !levels.length || levels.some((l) => !ALLOWED_LEVELS.includes(String(l)))) {
     throw new ArgError(`user_levels may only contain: ${ALLOWED_LEVELS.join(', ')}. Grant other levels in Tanda.`);
@@ -52,6 +54,7 @@ export function buildCreatePayload(args: Args): Rec {
   const depts = idList(args.department_ids);
   if (depts) payload.department_ids = [...new Set(depts)].sort((a, b) => a - b);
   payload.award_template_id = award;
+  if (rate !== undefined) payload.hourly_rate = rate;
   payload.user_levels = levels.map(String);
   return payload;
 }
@@ -107,6 +110,7 @@ export const createUserTool: Tool = {
       employment_start_date: { type: 'string', description: 'Start date YYYY-MM-DD' },
       department_ids: { type: 'array', items: { type: 'number' }, description: 'Teams to add the user to (e.g. Trainee departments)' },
       award_template_id: { type: 'number', description: 'Award template (default 42, or TANDA_DEFAULT_AWARD_TEMPLATE_ID)' },
+      hourly_rate: { type: 'number', description: 'Hourly pay rate, above 0 and at most 100 (needs the cost scope). Without it timesheets cost $0' },
       user_levels: { type: 'array', items: { type: 'string' }, description: 'Default ["employee"]; only "employee" is allowed' },
       send_invite: { type: 'boolean', description: 'Email the Tanda invite after creating (default false)' },
       source_ref: { type: 'string', description: 'Audit reference, e.g. the Monday item id. Required when called with the shared server token (ADR 0001)' },
@@ -139,10 +143,15 @@ export const createUserTool: Tool = {
     }
 
     if (dryRun || !token) {
+      if (payload.hourly_rate === undefined) {
+        warnings.push({ check: 'hourly_rate', reason: 'no pay rate given: this user\'s timesheets will cost $0 until one is set (tanda_update_user)' });
+      }
       return {
         status: 'preview',
         created: false,
         payload,
+        // payload.hourly_rate is a wage key and is redacted from responses; echo the value here
+        ...(payload.hourly_rate !== undefined ? { pay_rate: payload.hourly_rate } : {}),
         send_invite: sendInvite,
         confirm_token: signConfirmToken(CREATE_USER_TOOL, client.cacheScope, [payload, sendInvite, sourceRef ?? null]),
         expires_in_minutes: CONFIRM_TTL_MS / 60000,
