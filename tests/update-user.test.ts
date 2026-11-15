@@ -63,7 +63,7 @@ describe('tanda_update_user', () => {
 
   it('acceptance 1: a dry run returns a before → after diff and a confirm_token, and changes nothing', async () => {
     const { client, requests } = tanda();
-    const res = await run(client, { user_id: 500, hourly_rate: 15.5, award_template_id: 42, source_ref: 'isolved-backfill' });
+    const res = await run(client, { user_id: 500, hourly_rate: 15.5, award_template_id: 42, source_ref: 'isolved-backfill', show_wages: true });
     expect(res.isError).toBeFalsy();
     expect(res.content.summary).toMatchObject({ status: 'preview', changed: false, users: 1, will_change: 1 });
     expect(typeof res.content.summary.confirm_token).toBe('string');
@@ -132,6 +132,18 @@ describe('tanda_update_user', () => {
     expect(puts(requests)).toHaveLength(0);
   });
 
+  it('hides current and new rates unless show_wages or fields asks for them', async () => {
+    const { client } = tanda();
+    const hidden = await run(client, { user_id: 501, hourly_rate: 16.25 });
+    expect(hidden.content.rows[0].changes?.[0]).toMatchObject({ field: 'hourly_rate', before: 'hidden', after: 'hidden' });
+    expect(JSON.stringify(hidden.content)).not.toMatch(/15\.5|16\.25/);
+    const confirmed = await run(client, { user_id: 501, hourly_rate: 16.25, confirm_token: hidden.content.summary.confirm_token });
+    expect(confirmed.content.rows[0]).toMatchObject({ outcome: 'updated' });
+    expect(JSON.stringify(confirmed.content)).not.toMatch(/15\.5|16\.25/);
+    const viaFields = await run(client, { user_id: 501, hourly_rate: 17, fields: ['hourly_rate'] });
+    expect(viaFields.content.rows[0].changes?.[0]).toEqual({ field: 'hourly_rate', before: 16.25, after: 17 });
+  });
+
   it('flags a rate change over 25%, and the token is bound to the exact change set', async () => {
     const { client, requests } = tanda();
     const preview = await run(client, { user_id: 501, hourly_rate: 25 });
@@ -160,7 +172,7 @@ describe('tanda_update_user', () => {
 
   it('without the cost scope the current rate shows as null and a warning says why', async () => {
     const { client } = tanda({ noCost: true });
-    const res = await run(client, { user_id: 501, hourly_rate: 15.5 });
+    const res = await run(client, { user_id: 501, hourly_rate: 15.5, show_wages: true });
     expect(res.content.rows[0].changes?.[0]).toEqual({ field: 'hourly_rate', before: null, after: 15.5 });
     expect(JSON.stringify(res.content.summary.warnings)).toContain('cost scope');
   });
@@ -190,7 +202,8 @@ describe('#94 tanda_create_user hourly_rate', () => {
     const { client, requests } = createTanda();
     const args = { name: 'Rate Hire', email: 'rate@example.com', hourly_rate: 15.5 };
     const preview = await create(client, args);
-    expect(preview.content.pay_rate).toBe(15.5);
+    expect(preview.content.pay_rate_set).toBe(true);
+    expect(JSON.stringify(preview.content)).not.toContain('15.5');
     expect(preview.content.warnings).toBeUndefined();
     await create(client, { ...args, confirm_token: preview.content.confirm_token });
     expect((requests.find((r) => r.method === 'POST')?.body as Record<string, unknown>).hourly_rate).toBe(15.5);

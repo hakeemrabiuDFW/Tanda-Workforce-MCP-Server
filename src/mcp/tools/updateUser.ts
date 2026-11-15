@@ -1,7 +1,7 @@
 import { Tool } from './types';
 import { ArgError, Args, bool, idList, num, parseHourlyRate, requireId, text } from '../args';
 import { guardResponse } from '../guard';
-import { pickUserFields } from '../privacy';
+import { parseFields, pickUserFields, WAGE_FIELDS } from '../privacy';
 import { Warning, withWarnings, writeFailureReason } from '../warnings';
 import { checkConfirmToken, CONFIRM_TTL_MS, signConfirmToken } from '../confirm';
 import { writesEnabled } from '../../config/writes';
@@ -125,17 +125,24 @@ async function plan(client: TandaClient, update: UserUpdate, callerId: unknown):
     if (sameValue(field, before, after)) continue;
     diff.push({ field, before, after });
     if (field === 'hourly_rate' && typeof before === 'number' && before > 0 && Math.abs((after as number) - before) / before > RATE_CHANGE_FLAG) {
-      flags.push(`hourly_rate changes by more than ${RATE_CHANGE_FLAG * 100}% (${before} → ${after as number})`);
+      flags.push(`hourly_rate changes by more than ${RATE_CHANGE_FLAG * 100}%`);
     }
   }
   return { update, user, diff, flags };
 }
 
-function previewRow(p: Planned): Rec {
+/** Wage values stay hidden unless the caller opts in, like everywhere else (privacy.ts). */
+function present(diff: Planned['diff'], showWages: boolean): Rec[] {
+  return diff.map((d) => (WAGE_FIELDS.has(d.field) && !showWages
+    ? { field: d.field, before: 'hidden', after: 'hidden', note: 'pass show_wages: true to see rates' }
+    : d));
+}
+
+function previewRow(p: Planned, showWages: boolean): Rec {
   const base = { user_id: p.update.user_id, user_name: (p.user?.name as string) ?? null };
   if (p.refused) return { ...base, will_change: false, outcome: 'refused', reason: p.refused };
   if (!p.diff.length) return { ...base, will_change: false, outcome: 'unchanged' };
-  return { ...base, will_change: true, changes: p.diff, flags: p.flags };
+  return { ...base, will_change: true, changes: present(p.diff, showWages), flags: p.flags };
 }
 
 export const updateUserTool: Tool = {
@@ -160,6 +167,7 @@ export const updateUserTool: Tool = {
       source_ref: { type: 'string', description: 'Audit reference, e.g. "iSolved rate backfill". Required when called with the shared server token (ADR 0001)' },
       dry_run: { type: 'boolean', description: 'Preview only. Default true without confirm_token, false with it' },
       confirm_token: { type: 'string', description: 'Token from the preview; applies the changes' },
+      show_wages: { type: 'boolean', description: 'Show current and new rates in the diff (hidden by default)' },
       limit: { type: 'number', description: 'Rows per page (max 50)' },
       offset: { type: 'number', description: 'Row offset for paging (use page.next_offset from the previous response)' },
     },
@@ -177,6 +185,7 @@ export const updateUserTool: Tool = {
     const token = typeof args.confirm_token === 'string' && args.confirm_token.trim() ? args.confirm_token.trim() : undefined;
     const dryRun = bool(args.dry_run, !token);
     const request = [updates, sourceRef ?? null];
+    const showWages = bool(args.show_wages) || parseFields(args.fields).includes('hourly_rate');
     // Check the token before any Tanda call, so a mismatched confirm fails fast
     if (token && !dryRun) checkConfirmToken(token, UPDATE_USER_TOOL, client.cacheScope, request);
 
@@ -192,8 +201,8 @@ export const updateUserTool: Tool = {
     const warnings: Warning[] = [];
     const planned: Planned[] = [];
     for (const u of updates) planned.push(await plan(client, u, callerId));
-    const rated = planned.filter((p) => p.user && 'hourly_rate' in p.update.changes);
-    if (rated.length && !rated.some((p) => 'hourly_rate' in (p.user as Rec))) {
+    const ratedUsers = planned.flatMap((p) => (p.user && 'hourly_rate' in p.update.changes ? [p.user] : []));
+    if (ratedUsers.length && !ratedUsers.some((u) => 'hourly_rate' in u)) {
       warnings.push({ check: 'hourly_rate', reason: 'no current rate visible: either none is set or the token lacks the cost scope, in which case Tanda may refuse the change' });
     }
     const toChange = planned.filter((p) => !p.refused && p.diff.length);
@@ -213,7 +222,7 @@ export const updateUserTool: Tool = {
         summary.expires_in_minutes = CONFIRM_TTL_MS / 60000;
         summary.next_step = `To apply the ${toChange.length} change(s) marked will_change, call again with the same arguments plus confirm_token.`;
       }
-      return guardResponse({ ...summary, ...withWarnings(warnings) }, planned.map(previewRow), { offset: args.offset, pageSize: args.limit });
+      return guardResponse({ ...summary, ...withWarnings(warnings) }, planned.map((p) => previewRow(p, showWages)), { offset: args.offset, pageSize: args.limit });
     }
 
     const rows: Rec[] = [];
@@ -221,7 +230,7 @@ export const updateUserTool: Tool = {
     let failed = 0;
     for (const p of planned) {
       if (p.refused || !p.diff.length) {
-        rows.push(previewRow(p));
+        rows.push(previewRow(p, showWages));
         continue;
       }
       const body: Rec = {};
@@ -235,7 +244,7 @@ export const updateUserTool: Tool = {
           rows.push({ user_id: p.update.user_id, user_name: p.user?.name ?? null, outcome: 'not_applied', fields: dropped, reason: 'Tanda kept the old value; check the token\'s scopes' });
         } else {
           succeeded++;
-          rows.push({ user_id: p.update.user_id, user_name: p.user?.name ?? null, outcome: 'updated', changes: p.diff, user: pickUserFields({ ...p.user, ...result }) });
+          rows.push({ user_id: p.update.user_id, user_name: p.user?.name ?? null, outcome: 'updated', changes: present(p.diff, showWages), user: pickUserFields({ ...p.user, ...result }) });
         }
         logger.info(`${UPDATE_USER_TOOL} updated user`, { user_id: p.update.user_id, fields: p.diff.map((d) => d.field), caller_user_id: callerId ?? null, caller: client.cacheScope, source_ref: sourceRef });
       } catch (error) {

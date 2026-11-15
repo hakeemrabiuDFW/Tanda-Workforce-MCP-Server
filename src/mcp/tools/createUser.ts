@@ -149,8 +149,8 @@ export const createUserTool: Tool = {
         status: 'preview',
         created: false,
         payload,
-        // payload.hourly_rate is a wage key and is redacted from responses; echo the value here
-        ...(payload.hourly_rate !== undefined ? { pay_rate: payload.hourly_rate } : {}),
+        // payload.hourly_rate is redacted like any wage key; say it's set without the value
+        ...(payload.hourly_rate !== undefined ? { pay_rate_set: true } : {}),
         send_invite: sendInvite,
         confirm_token: signConfirmToken(CREATE_USER_TOOL, client.cacheScope, [payload, sendInvite, sourceRef ?? null]),
         expires_in_minutes: CONFIRM_TTL_MS / 60000,
