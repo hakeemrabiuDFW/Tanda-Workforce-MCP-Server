@@ -12,7 +12,8 @@
     "test": "jest",
     "docker:build": "docker build -t tanda-mcp-server .",
     "docker:run": "docker run -p 3000:3000 --env-file .env tanda-mcp-server",
-    "smoke": "node scripts/smoke.mjs"
+    "smoke": "node scripts/smoke.mjs",
+    "smoke:writes": "node scripts/smoke-writes.mjs"
   },
   "keywords": [
     "mcp",
