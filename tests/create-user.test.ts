@@ -10,7 +10,11 @@ const run = async (client: Parameters<typeof executeTool>[0], args: Record<strin
 const existing = [
   { id: 10, name: 'Pat Lee', email: 'Pat@Example.com', employment_start_date: '2026-01-05', active: true },
 ];
-const inactive = [{ id: 11, name: 'Old Hire', email: 'old@example.com', employment_start_date: '2025-02-01', active: false }];
+const inactive = [
+  { id: 11, name: 'Old Hire', email: 'old@example.com', employment_start_date: '2025-02-01', active: false },
+  // Tanda returns null for an inactive user's email but still refuses to create a user with it
+  { id: 12, name: 'Former Smoke', email: null, employment_start_date: null, active: false },
+];
 const departments = [{ id: 1156446, name: 'Trainee', location_id: 1 }];
 
 function tanda(opts: { createStatus?: number; inviteStatus?: number } = {}) {
@@ -113,6 +117,29 @@ describe('tanda_create_user', () => {
     const old = await run(client, { ...hire, email: 'old@example.com', confirm_token: 'x.y' });
     expect(old.content).toMatchObject({ status: 'exists', existing_user_id: 11, active: false });
     expect(posts(requests)).toHaveLength(0);
+  });
+
+  it('matches an inactive user whose email Tanda hides by name, never creates or reactivates, and allows not_a_rehire', async () => {
+    const { client, requests } = tanda();
+    const args = { name: ' former  SMOKE ', email: 'former.smoke@example.com', source_ref: 'monday-9' };
+    const preview = await run(client, args);
+    expect(preview.content).toMatchObject({ status: 'exists', created: false, existing_user_id: 12, matched_on: 'name_inactive', active: false });
+    expect(String(preview.content.note)).toMatch(/rehire them in Tanda/);
+    expect(preview.content.confirm_token).toBeUndefined();
+    const confirm = await run(client, { ...args, confirm_token: 'x.y' });
+    expect(confirm.content).toMatchObject({ status: 'exists', existing_user_id: 12 });
+    expect(requests.filter((r) => r.method !== 'GET')).toHaveLength(0);         // no POST, PUT or DELETE: nobody created or reactivated
+
+    const different = await run(client, { ...args, not_a_rehire: true });
+    expect(different.content).toMatchObject({ status: 'preview' });
+    expect(typeof different.content.confirm_token).toBe('string');
+  });
+
+  it('does not name-match an active user or an inactive user whose email is visible', async () => {
+    const res = await run(tanda().client, { name: 'Old Hire', email: 'someone.else@example.com', source_ref: 'monday-9' });
+    expect(res.content).toMatchObject({ status: 'preview' });
+    const act = await run(tanda().client, { name: 'Pat Lee', email: 'another.pat@example.com', source_ref: 'monday-9' });
+    expect(act.content).toMatchObject({ status: 'preview' });
   });
 
   it('refuses the same name and start date under a different email', async () => {
@@ -225,9 +252,15 @@ describe('tanda_create_user', () => {
       ['/departments', () => departments],
       ['/users/me', () => ({ id: 1 })],
     ]);
-    const preview = await run(client, hire);
+    // By default the inactive same-name user (email hidden) is caught at preview, before any POST
+    const caught = await run(client, hire);
+    expect(caught.content).toMatchObject({ status: 'exists', matched_on: 'name_inactive', existing_user_id: 42 });
+    expect(requests.filter((r) => r.method === 'POST')).toHaveLength(0);
+    // With not_a_rehire the create goes ahead, and Tanda's own rejection still maps to exists
+    const args = { ...hire, not_a_rehire: true };
+    const preview = await run(client, args);
     expect(preview.content.status).toBe('preview');
-    const res = await run(client, { ...hire, confirm_token: preview.content.confirm_token });
+    const res = await run(client, { ...args, confirm_token: preview.content.confirm_token });
     expect(res.isError).toBeFalsy();
     expect(res.content).toMatchObject({ status: 'exists', created: false, matched_on: 'email_in_tanda', active: false, existing_user_id: 42, same_name_users: 1 });
     expect(requests.filter((r) => r.method === 'POST')).toHaveLength(1);
