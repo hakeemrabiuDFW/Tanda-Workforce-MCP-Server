@@ -187,6 +187,18 @@ describe('tanda_create_user', () => {
     for (const k of Object.keys(extra)) expect(body).not.toHaveProperty(k);
   });
 
+  it('reports a create response without an id as an error, not an undefined user_id', async () => {
+    const { client } = fakeTanda([
+      ['/users', (r: RecordedRequest) => (r.method === 'POST' ? { __status: 201, body: {} } : [])],
+      ['/users/inactive', () => []],
+      ['/departments', () => departments],
+    ]);
+    const preview = await run(client, hire);
+    const res = await run(client, { ...hire, confirm_token: preview.content.confirm_token });
+    expect(res.isError).toBe(true);
+    expect(JSON.stringify(res.content)).toContain('no user id');
+  });
+
   it('maps a Tanda rejection to a clear error', async () => {
     const { client } = tanda({ createStatus: 403 });
     const preview = await run(client, hire);

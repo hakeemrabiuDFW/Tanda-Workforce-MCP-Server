@@ -1,6 +1,6 @@
 import crypto from 'crypto';
 import { Tool } from './types';
-import { ArgError, Args, bool, idList, num } from '../args';
+import { ArgError, Args, bool, idList, num, text } from '../args';
 import { loadOrg } from '../context';
 import { pickUserFields } from '../privacy';
 import { Warning, withWarnings } from '../warnings';
@@ -19,15 +19,7 @@ const ALLOWED_LEVELS = ['employee'];
 const EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
 
 function defaultAwardTemplateId(): number {
-  return num(process.env.TANDA_DEFAULT_AWARD_TEMPLATE_ID, 42) as number;
-}
-
-function text(value: unknown, name: string, max: number): string | undefined {
-  if (value === undefined || value === null || value === '') return undefined;
-  if (typeof value !== 'string') throw new ArgError(`${name} must be a string.`);
-  const trimmed = value.trim().replace(/\s+/g, ' ');
-  if (trimmed.length > max) throw new ArgError(`${name} must be at most ${max} characters.`);
-  return trimmed || undefined;
+  return num(process.env.TANDA_DEFAULT_AWARD_TEMPLATE_ID) ?? 42;
 }
 
 /**
@@ -122,7 +114,7 @@ async function checkDepartments(client: TandaClient, ids: number[] | undefined, 
 
 async function callerId(client: TandaClient): Promise<unknown> {
   try {
-    return ((await client.getCurrentUser()) as unknown as Rec).id ?? null;
+    return (await client.getCurrentUser()).id ?? null;
   } catch {
     return null;
   }
@@ -184,7 +176,11 @@ export const createUserTool: Tool = {
 
     checkConfirmToken(token, payload, sendInvite, sourceRef, client.cacheScope);
     const created = await client.createUser(payload);
-    const userId = created.id as number;
+    const userId = created.id;
+    if (typeof userId !== 'number') {
+      logger.warn(`${CREATE_USER_TOOL}: Tanda returned no user id`, { caller: client.cacheScope, source_ref: sourceRef });
+      throw new TandaApiError('Tanda accepted the request but returned no user id.', 502, 'Check tanda_people (search by name) before retrying, so the user is not created twice.');
+    }
     logger.info(`${CREATE_USER_TOOL} created user`, { user_id: userId, caller_user_id: await callerId(client), caller: client.cacheScope, source_ref: sourceRef });
 
     let invite: 'not_requested' | 'sent' | 'failed' = 'not_requested';
