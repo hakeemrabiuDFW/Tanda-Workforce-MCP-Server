@@ -111,7 +111,7 @@ function resolveSharedSecretAuth(token: string): Request['auth'] | null {
   if (!safeEqual(token, secret)) return null;
 
   if (!sharedSecretClient) {
-    sharedSecretClient = new TandaClient(config.TANDA_ACCESS_TOKEN);
+    sharedSecretClient = new TandaClient(config.TANDA_ACCESS_TOKEN, undefined, undefined, { sharedIdentity: true });
   }
   return {
     payload: { sessionId: SHARED_SECRET_SESSION_ID },
