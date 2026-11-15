@@ -1,5 +1,5 @@
 import { Tool } from './types';
-import { ArgError, Args, bool, idList, num, requireId, text } from '../args';
+import { ArgError, Args, bool, idList, num, parseHourlyRate, requireId, text } from '../args';
 import { guardResponse } from '../guard';
 import { pickUserFields } from '../privacy';
 import { Warning, withWarnings, writeFailureReason } from '../warnings';
@@ -18,19 +18,8 @@ type Field = (typeof UPDATABLE_FIELDS)[number];
 export const MAX_UPDATES = 50;
 /** Arguments that steer the call rather than change the user. */
 const CALL_ARGS = new Set(['user_id', 'updates', 'source_ref', 'dry_run', 'confirm_token', 'limit', 'offset', 'fields', 'show_wages']);
-export const MAX_HOURLY_RATE = 100;
 /** A rate change bigger than this (vs the current rate) is flagged in the preview, not refused. */
 const RATE_CHANGE_FLAG = 0.25;
-
-/** Shared by tanda_create_user: a positive hourly rate up to MAX_HOURLY_RATE, rounded to cents. */
-export function parseHourlyRate(value: unknown, name = 'hourly_rate'): number | undefined {
-  if (value === undefined || value === null || value === '') return undefined;
-  const rate = num(value);
-  if (rate === undefined || !(rate > 0) || rate > MAX_HOURLY_RATE) {
-    throw new ArgError(`${name} must be a number above 0 and at most ${MAX_HOURLY_RATE}.`);
-  }
-  return Math.round(rate * 100) / 100;
-}
 
 export interface UserUpdate {
   user_id: number;

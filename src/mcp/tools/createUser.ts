@@ -1,5 +1,5 @@
 import { Tool } from './types';
-import { ArgError, Args, bool, idList, num, text } from '../args';
+import { ArgError, Args, bool, idList, num, parseHourlyRate, text } from '../args';
 import { loadOrg } from '../context';
 import { pickUserFields } from '../privacy';
 import { Warning, withWarnings, writeFailureReason } from '../warnings';
@@ -8,7 +8,6 @@ import { writesEnabled } from '../../config/writes';
 import { Rec, TandaApiError, TandaClient } from '../../tanda/client';
 import { isDate } from '../../utils/time';
 import { logger } from '../../utils/logger';
-import { parseHourlyRate } from './updateUser';
 
 export const CREATE_USER_TOOL = 'tanda_create_user';
 
