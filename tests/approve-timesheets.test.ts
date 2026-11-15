@@ -149,7 +149,7 @@ describe('tanda_approve_timesheets', () => {
     const preview = await run(client, args);
     const res = await run(client, { ...args, confirm_token: preview.content.confirm_token });
     expect(res.content.summary).toMatchObject({ succeeded: 1, failed: 1 });
-    expect(res.content.rows.find((r) => r.timesheet_id === 1)).toMatchObject({ outcome: 'failed' });
+    expect(res.content.rows.find((r) => r.timesheet_id === 1)).toMatchObject({ outcome: 'failed', reason: expect.stringMatching(/^Tanda returned HTTP 403/) });
   });
 
   it('refuses a token for a different batch, action or source_ref', async () => {

@@ -4,11 +4,12 @@ import { guardResponse } from '../guard';
 import { departmentsForLocations, loadOrg, loadPeople } from '../context';
 import { checkConfirmToken, CONFIRM_TTL_MS, signConfirmToken } from '../confirm';
 import { writesEnabled } from '../../config/writes';
-import { Rec, TandaApiError, TandaClient } from '../../tanda/client';
+import { Rec, TandaClient } from '../../tanda/client';
 import { itemDate, itemHours } from '../../tanda/normalize';
 import { addDays, round2, todayInZone, toUnixSeconds } from '../../utils/time';
 import { logger } from '../../utils/logger';
 import { workweek } from '../workweek';
+import { writeFailureReason } from '../warnings';
 
 export const APPROVE_TIMESHEETS_TOOL = 'tanda_approve_timesheets';
 
@@ -267,7 +268,7 @@ export const approveTimesheetsTool: Tool = {
         await client.setTimesheetStatus(p.timesheet_id, action === 'approve' ? 'approved' : 'pending');
         results.push({ timesheet_id: p.timesheet_id, user_name: p.user_name, outcome: p.new_status, previous_status: p.status, new_status: p.new_status, flags: p.flags, shift_updates: p.shift_changes.length });
       } catch (error) {
-        const reason = error instanceof TandaApiError ? error.message : 'unexpected error';
+        const reason = writeFailureReason(error, 'unexpected error; check server logs');
         results.push({ timesheet_id: p.timesheet_id, user_name: p.user_name, outcome: 'failed', previous_status: p.status, new_status: p.status, reason, flags: p.flags });
       }
     }

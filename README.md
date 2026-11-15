@@ -43,7 +43,7 @@ The token is bound to the arguments and to the Tanda identity that asked for the
 
 ### Deactivating employees (`tanda_deactivate_user`, off by default)
 
-Tanda's `DELETE /users/{id}` does not erase anyone. It marks the user inactive, and Tanda's rehire reverses it. Use this tool to remove test hires and leavers from the active, billed headcount. It works in the same two steps as `tanda_create_user`: call with `user_id` (and optionally `source_ref`) to preview the user and get a `confirm_token`, then repeat the call with the token. An inactive user returns `status: "already_inactive"`. The tool refuses anyone with a level other than `employee`, and it refuses the caller's own account; it fails closed if the caller can't be identified. Each deactivation is logged with the user id, the caller and `source_ref`.
+Tanda's `DELETE /users/{id}` does not erase anyone. It marks the user inactive, and Tanda's rehire reverses it. Use this tool to remove test hires and leavers from the active, billed headcount. It works in the same two steps as `tanda_create_user`: call with `user_id` (plus `source_ref`, which is required under the shared server token; see [ADR 0001](docs/adr/0001-write-tool-identity.md)) to preview the user and get a `confirm_token`, then repeat the call with the token. An inactive user returns `status: "already_inactive"`. The tool refuses anyone with a level other than `employee`, and it refuses the caller's own account; it fails closed if the caller can't be identified. Each deactivation is logged with the user id, the caller and `source_ref`.
 
 ### Approving timesheets (`tanda_approve_timesheets`, off by default)
 

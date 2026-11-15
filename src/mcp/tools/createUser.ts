@@ -2,7 +2,7 @@ import { Tool } from './types';
 import { ArgError, Args, bool, idList, num, text } from '../args';
 import { loadOrg } from '../context';
 import { pickUserFields } from '../privacy';
-import { Warning, withWarnings } from '../warnings';
+import { Warning, withWarnings, writeFailureReason } from '../warnings';
 import { checkConfirmToken, CONFIRM_TTL_MS, signConfirmToken } from '../confirm';
 import { writesEnabled } from '../../config/writes';
 import { Rec, TandaApiError, TandaClient } from '../../tanda/client';
@@ -167,7 +167,7 @@ export const createUserTool: Tool = {
         invite = 'sent';
       } catch (error) {
         invite = 'failed';
-        warnings.push({ check: 'send_invite', reason: error instanceof TandaApiError ? error.message : 'invite failed; send it from Tanda' });
+        warnings.push({ check: 'send_invite', reason: writeFailureReason(error, 'invite failed; send it from Tanda') });
       }
     }
     return { status: 'created', created: true, user_id: userId, user: pickUserFields(created), invite, ...withWarnings(warnings) };
