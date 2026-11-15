@@ -26,7 +26,7 @@ describe('WFM-004 unapproved cost covers every open pay period', () => {
   ];
   const routes = () => fakeTanda([
     ['/departments', () => [{ id: 11, name: 'Cleaning', location_id: 1 }]],
-    ['/locations', () => [{ id: 1, name: 'KIPP #3' }]],
+    ['/locations', () => [{ id: 1, name: 'Site A' }]],
     [/^\/timesheets\/on\//, (r) => {
       const date = r.path.split('/').pop() as string;
       if (date >= '2026-10-19' && date <= '2026-11-01') return current;
