@@ -201,14 +201,14 @@ export class TandaClient {
   }
 
   /**
-   * POST to an allowlisted write endpoint. Only a 401 is retried (after a token refresh):
+   * Send an allowlisted write (see config/writes.ts). Only a 401 is retried (after a token refresh):
    * a timeout or 5xx may have created the record, so those are never retried blindly.
    */
-  private async post<T = unknown>(path: string, body: Rec): Promise<T> {
+  private async write<T = unknown>(method: 'post' | 'delete', path: string, body?: Rec): Promise<T> {
     let refreshed = false;
     for (;;) {
       try {
-        return (await this.client.post<T>(path, body)).data;
+        return (await this.client.request<T>({ method, url: path, data: body })).data;
       } catch (error) {
         const status = (error as AxiosError).response?.status;
         if (status === 401 && !refreshed && (this.refreshToken || this.options.refresh)) {
@@ -227,12 +227,17 @@ export class TandaClient {
 
   /** POST /users. Needs TANDA_WRITES_ENABLED=true and the "user" scope. */
   async createUser(body: Rec): Promise<Rec> {
-    return this.post<Rec>('/users', body);
+    return this.write<Rec>('post', '/users', body);
   }
 
   /** POST /users/{id}/invite: emails the user an invite to Tanda. */
   async inviteUser(userId: number): Promise<void> {
-    await this.post(`/users/${userId}/invite`, {});
+    await this.write('post', `/users/${userId}/invite`, {});
+  }
+
+  /** DELETE /users/{id}: Tanda marks the user inactive (reversible with rehire) and returns them. */
+  async deactivateUser(userId: number): Promise<Rec> {
+    return this.write<Rec>('delete', `/users/${userId}`);
   }
 
   private async getList<T = Rec>(path: string, params: Record<string, string | undefined> = {}, opts: GetOptions = {}): Promise<T[]> {

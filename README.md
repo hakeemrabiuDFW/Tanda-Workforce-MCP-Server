@@ -1,11 +1,11 @@
 # Tanda Workforce MCP Server v4.0.1
 
-A read-only MCP (Model Context Protocol) server for the Tanda / Workforce.com API, with one guarded exception: creating new employees. It exposes 12 consolidated read tools, plus `tanda_create_user` when `TANDA_WRITES_ENABLED=true`. Every tool is privacy-filtered and returns at most 25 KB, so assistants like Claude can answer workforce questions without overflowing their context.
+A read-only MCP (Model Context Protocol) server for the Tanda / Workforce.com API, with one guarded exception: creating new employees. It exposes 12 consolidated read tools, plus `tanda_create_user` and `tanda_deactivate_user` when `TANDA_WRITES_ENABLED=true`. Every tool is privacy-filtered and returns at most 25 KB, so assistants like Claude can answer workforce questions without overflowing their context.
 
 ## Security
 
 - **Auth on every MCP route.** `POST /mcp`, `GET /mcp` and `POST /` require an OAuth JWT or `Authorization: Bearer <MCP_SHARED_SECRET>`. Unauthenticated calls get `401`.
-- **Read-only, with one exception.** The Tanda client refuses any non-GET request except `POST /users` and `POST /users/{id}/invite`, and refuses those too unless `TANDA_WRITES_ENABLED=true` (off by default).
+- **Read-only, with one exception.** The Tanda client refuses any non-GET request except `POST /users`, `POST /users/{id}/invite` and `DELETE /users/{id}`, and refuses those too unless `TANDA_WRITES_ENABLED=true` (off by default).
 - **Least-privilege scopes.** The server requests `me roster timesheet department user cost leave`. It never requests `financial` or `personal`. `unavailability` is off by default because Workforce.com's OAuth fails when it is requested; add it to `TANDA_SCOPES` only if your OAuth app supports it.
 - **Privacy by default.** User records are whitelisted, and `date_of_birth`, `phone`, `email`, `legal_*` and `hourly_rate` are returned only when the `fields` parameter names them. `passcode`, `tax_*`, `bank_*` and `super_*` are never returned.
 
@@ -38,6 +38,10 @@ Only listed and callable when `TANDA_WRITES_ENABLED=true`. It creates a plain em
 2. Call again with the same arguments plus `confirm_token`. The response is `status: "created"` with `user_id`, the user as `tanda_people` returns it, and `invite` (`not_requested`, `sent` or `failed`; a failed invite is a warning, not an error).
 
 The token is bound to the arguments and to the Tanda identity that asked for the preview. Changed arguments, another identity or an expired token are refused. Both calls first check for duplicates among active and inactive users. A user with the same email, or with the same name and start date, returns `status: "exists"` with `existing_user_id` and creates nothing. Unknown `department_ids` are refused. Only the `employee` level can be set, and wage, date of birth, passcode, tax, bank and role fields are never sent. Each creation is logged with the new user id, the caller's Tanda user id and `source_ref`.
+
+### Deactivating employees (`tanda_deactivate_user`, off by default)
+
+Tanda's `DELETE /users/{id}` does not erase anyone. It marks the user inactive, and Tanda's rehire reverses it. Use this tool to remove test hires and leavers from the active, billed headcount. It works in the same two steps as `tanda_create_user`: call with `user_id` (and optionally `source_ref`) to preview the user and get a `confirm_token`, then repeat the call with the token. An inactive user returns `status: "already_inactive"`. The tool refuses anyone with a level other than `employee`, and it refuses the caller's own account; it fails closed if the caller can't be identified. Each deactivation is logged with the user id, the caller and `source_ref`.
 
 A **supervisor** is any user rostered to a department named `Supervisor` or `Supervisors` (case-insensitive). The **bookkeeping sites** 281737 (One Time Projects), 301754 (Floater) and 396358 (MCP Test) are flagged, and analytics tools exclude them by default.
 
@@ -76,7 +80,7 @@ npm run build && npm start
 | `TANDA_BOOKKEEPING_LOCATION_IDS` | no | Default `281737,301754,396358` |
 | `TANDA_RATE_LIMIT_PER_MIN` | no | Client-side limit, default 80 (Tanda allows 100/min shared across password tokens) |
 | `MCP_LIST_ALIASES` | no | `true` lists the deprecated names in `tools/list` |
-| `TANDA_WRITES_ENABLED` | no | `true` turns on `tanda_create_user`. Off by default |
+| `TANDA_WRITES_ENABLED` | no | `true` turns on `tanda_create_user` and `tanda_deactivate_user`. Off by default |
 | `TANDA_DEFAULT_AWARD_TEMPLATE_ID` | no | Award template for new users when none is given. Default 42 |
 
 ## Connecting to Claude
