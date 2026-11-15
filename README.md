@@ -1,11 +1,11 @@
 # Tanda Workforce MCP Server v4.0.1
 
-A read-only MCP (Model Context Protocol) server for the Tanda / Workforce.com API, with one guarded exception: creating new employees. It exposes 12 consolidated read tools, plus three write tools (`tanda_create_user`, `tanda_deactivate_user`, `tanda_approve_timesheets`) when `TANDA_WRITES_ENABLED=true`. Every tool is privacy-filtered and returns at most 25 KB, so assistants like Claude can answer workforce questions without overflowing their context.
+A read-only MCP (Model Context Protocol) server for the Tanda / Workforce.com API, with three guarded exceptions: creating employees, deactivating them and approving timesheets. It exposes 12 consolidated read tools, plus three write tools (`tanda_create_user`, `tanda_deactivate_user`, `tanda_approve_timesheets`) when `TANDA_WRITES_ENABLED=true`. Every tool is privacy-filtered and returns at most 25 KB, so assistants like Claude can answer workforce questions without overflowing their context.
 
 ## Security
 
 - **Auth on every MCP route.** `POST /mcp`, `GET /mcp` and `POST /` require an OAuth JWT or `Authorization: Bearer <MCP_SHARED_SECRET>`. Unauthenticated calls get `401`.
-- **Read-only, with one exception.** The Tanda client refuses any non-GET request except `POST /users`, `POST /users/{id}/invite`, `DELETE /users/{id}`, `PUT /timesheets/{id}` and `PUT /shifts/{id}`, and refuses those too unless `TANDA_WRITES_ENABLED=true` (off by default).
+- **Read-only, with three guarded exceptions.** The Tanda client refuses any non-GET request except `POST /users`, `POST /users/{id}/invite`, `DELETE /users/{id}`, `PUT /timesheets/{id}` and `PUT /shifts/{id}`, and refuses those too unless `TANDA_WRITES_ENABLED=true` (off by default).
 - **Least-privilege scopes.** The server requests `me roster timesheet department user cost leave`. It never requests `financial` or `personal`. `unavailability` is off by default because Workforce.com's OAuth fails when it is requested; add it to `TANDA_SCOPES` only if your OAuth app supports it.
 - **Privacy by default.** User records are whitelisted, and `date_of_birth`, `phone`, `email`, `legal_*` and `hourly_rate` are returned only when the `fields` parameter names them. `passcode`, `tax_*`, `bank_*` and `super_*` are never returned.
 

@@ -41,6 +41,7 @@ interface Plan {
   hours: number;
   cost: number;
   will_change: boolean;
+  new_status: string;
   skip_reason?: string;
   flags: Array<{ shift_id: number | null; date: string | null; reason: string }>;
   shift_changes: ShiftChange[];
@@ -160,13 +161,13 @@ async function buildPlans(client: TandaClient, args: Record<string, unknown>, ac
       hours: round2(shifts.reduce((n, s) => n + itemHours(s), 0)),
       cost: round2(Number(ts.total_cost) || 0),
     };
-    const skip = (reason: string): Plan => ({ ...base, will_change: false, skip_reason: reason, flags: [], shift_changes: [] });
+    const skip = (reason: string): Plan => ({ ...base, will_change: false, new_status: status, skip_reason: reason, flags: [], shift_changes: [] });
     if (status === 'exported') return skip('exported: costs are locked');
     if (action === 'approve' && status === 'approved') return skip('already approved');
     if (action === 'unapprove' && status !== 'approved') return skip('not approved');
     if (finish && finish < addDays(today, -PAST_PERIOD_DAYS) && !allowPast) return skip(`period ended over ${PAST_PERIOD_DAYS} days ago: pass allow_past_period`);
-    if (action === 'unapprove') return { ...base, will_change: true, flags: [], shift_changes: [] };
-    return { ...base, will_change: true, ...planShifts(ts, schedules, fillMissing, today, week.start) };
+    if (action === 'unapprove') return { ...base, will_change: true, new_status: 'pending', flags: [], shift_changes: [] };
+    return { ...base, will_change: true, new_status: 'approved', ...planShifts(ts, schedules, fillMissing, today, week.start) };
   });
   const changing = plans.filter((p) => p.will_change).length;
   if (changing > MAX_BATCH) throw new ArgError(`${changing} timesheets would change; the limit is ${MAX_BATCH} per call. Narrow with timesheet_ids, user_ids or location_ids.`);
@@ -264,10 +265,10 @@ export const approveTimesheetsTool: Tool = {
       try {
         for (const c of p.shift_changes) await client.updateShift(c.shift_id, { finish: c.finish, metadata: c.metadata });
         await client.setTimesheetStatus(p.timesheet_id, action === 'approve' ? 'approved' : 'pending');
-        results.push({ timesheet_id: p.timesheet_id, user_name: p.user_name, outcome: action === 'approve' ? 'approved' : 'pending', flags: p.flags, shift_updates: p.shift_changes.length });
+        results.push({ timesheet_id: p.timesheet_id, user_name: p.user_name, outcome: p.new_status, previous_status: p.status, new_status: p.new_status, flags: p.flags, shift_updates: p.shift_changes.length });
       } catch (error) {
         const reason = error instanceof TandaApiError ? error.message : 'unexpected error';
-        results.push({ timesheet_id: p.timesheet_id, user_name: p.user_name, outcome: 'failed', reason, flags: p.flags });
+        results.push({ timesheet_id: p.timesheet_id, user_name: p.user_name, outcome: 'failed', previous_status: p.status, new_status: p.status, reason, flags: p.flags });
       }
     }
     const ok = results.filter((r) => r.outcome !== 'failed');

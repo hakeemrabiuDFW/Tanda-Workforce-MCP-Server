@@ -88,7 +88,7 @@ describe('tanda_approve_timesheets', () => {
     const res = await run(client, period);
     expect(res.content.summary).toMatchObject({ status: 'preview', timesheets: 6, will_change: 4, skipped: 2, flagged: 3 });
     expect(typeof res.content.confirm_token).toBe('string');
-    expect(row(res.content, 1)).toMatchObject({ will_change: true, flags: [], shift_changes: [] });
+    expect(row(res.content, 1)).toMatchObject({ will_change: true, status: 'pending', new_status: 'approved', flags: [], shift_changes: [] });
     expect(row(res.content, 2).shift_changes).toEqual([
       expect.objectContaining({ shift_id: 201, finish: nySeconds('2026-08-12', '15:00'), metadata: expect.stringContaining('MCP-EXCEPTION') }),
     ]);
@@ -113,6 +113,7 @@ describe('tanda_approve_timesheets', () => {
     const res = await run(client, { ...args, confirm_token: preview.content.confirm_token });
     expect(res.isError).toBeFalsy();
     expect(res.content.summary).toMatchObject({ status: 'applied', succeeded: 2, failed: 0 });
+    expect(res.content.rows[0]).toMatchObject({ previous_status: 'pending', new_status: 'approved' });
     expect(writes(requests).map((r) => [r.path, r.body])).toEqual([
       ['/timesheets/1', { status: 'approved' }],
       ['/shifts/201', { finish: nySeconds('2026-08-12', '15:00'), metadata: expect.stringContaining('missing clock-out, filled from roster') }],
