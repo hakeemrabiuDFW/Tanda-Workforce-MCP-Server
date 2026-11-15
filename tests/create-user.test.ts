@@ -199,6 +199,47 @@ describe('tanda_create_user', () => {
     expect(JSON.stringify(res.content)).toContain('no user id');
   });
 
+  it('warns when Tanda does not return the email, and still tries the invite (#105)', async () => {
+    const { client, requests } = fakeTanda([
+      ['/users', (r: RecordedRequest) => (r.method === 'POST' ? { __status: 201, body: { id: 700, ...(r.body as object), email: null, active: true } } : [])],
+      ['/users/inactive', () => []],
+      [/^\/users\/\d+\/invite$/, () => ({ __status: 201, body: {} })],
+      ['/departments', () => departments],
+      ['/users/me', () => ({ id: 1 })],
+    ]);
+    const args = { ...hire, send_invite: true };
+    const preview = await run(client, args);
+    const res = await run(client, { ...args, confirm_token: preview.content.confirm_token });
+    expect(res.content).toMatchObject({ status: 'created', user_id: 700, invite: 'sent' });
+    expect(res.content.warnings).toEqual([expect.objectContaining({ check: 'email' })]);
+    expect(requests.some((r) => r.path === '/users/700/invite')).toBe(true);
+  });
+
+  it("maps Tanda's 'email already in use' rejection to exists with the existing id (#105)", async () => {
+    const old = { id: 42, name: 'Test Hire', active: false, email: null };
+    const { client, requests } = fakeTanda([
+      ['/users', (r: RecordedRequest) => (r.method === 'POST'
+        ? { __status: 400, body: { error: 'Validation failed: Email is already in use by an inactive user Test Hire' } }
+        : [])],
+      ['/users/inactive', () => [old]],
+      ['/departments', () => departments],
+      ['/users/me', () => ({ id: 1 })],
+    ]);
+    const preview = await run(client, hire);
+    expect(preview.content.status).toBe('preview');
+    const res = await run(client, { ...hire, confirm_token: preview.content.confirm_token });
+    expect(res.isError).toBeFalsy();
+    expect(res.content).toMatchObject({ status: 'exists', created: false, matched_on: 'email_in_tanda', active: false, existing_user_id: 42, same_name_users: 1 });
+    expect(requests.filter((r) => r.method === 'POST')).toHaveLength(1);
+  });
+
+  it('gives no email warning when Tanda keeps the email', async () => {
+    const { client } = tanda();
+    const preview = await run(client, hire);
+    const res = await run(client, { ...hire, confirm_token: preview.content.confirm_token });
+    expect(res.content.warnings).toBeUndefined();
+  });
+
   it('maps a Tanda rejection to a clear error', async () => {
     const { client } = tanda({ createStatus: 403 });
     const preview = await run(client, hire);

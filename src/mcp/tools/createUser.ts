@@ -74,6 +74,23 @@ async function findExisting(client: TandaClient, payload: Rec): Promise<Rec | nu
   return null;
 }
 
+/**
+ * Tanda rejects a second user with the same email even when its API doesn't return that email to us
+ * (#105): "Validation failed: Email is already in use by an inactive user <name>".
+ */
+export function emailInUse(error: unknown): { name: string; active: boolean } | null {
+  if (!(error instanceof TandaApiError) || (error.statusCode !== 400 && error.statusCode !== 422)) return null;
+  const m = error.message.match(/email is already in use by an? (active|inactive)? ?user (.+?)\.?$/i);
+  return m ? { name: m[2].trim(), active: m[1]?.toLowerCase() !== 'inactive' } : null;
+}
+
+/** The existing user Tanda named, by name among active and inactive users: an id only when exactly one matches. */
+async function existingByName(client: TandaClient, name: string): Promise<{ existing_user_id: unknown; same_name_users: number }> {
+  const [active, inactive] = await Promise.all([client.getUsers(), client.getInactiveUsers()]);
+  const matches = [...active, ...inactive].filter((u) => normName(u.name) === normName(name));
+  return { existing_user_id: matches.length === 1 ? matches[0].id : null, same_name_users: matches.length };
+}
+
 /** Unknown department ids are refused; if departments can't be read the check is skipped with a warning. */
 async function checkDepartments(client: TandaClient, ids: number[] | undefined, warnings: Warning[]): Promise<void> {
   if (!ids?.length) return;
@@ -160,13 +177,36 @@ export const createUserTool: Tool = {
     }
 
     checkConfirmToken(token, CREATE_USER_TOOL, client.cacheScope, [payload, sendInvite, sourceRef ?? null]);
-    const created = await client.createUser(payload);
+    let created: Rec;
+    try {
+      created = await client.createUser(payload);
+    } catch (error) {
+      const inUse = emailInUse(error);
+      if (!inUse) throw error;
+      const found = await existingByName(client, inUse.name);
+      logger.info(`${CREATE_USER_TOOL} refused duplicate (Tanda: email in use)`, { existing_user_id: found.existing_user_id, caller: client.cacheScope, source_ref: sourceRef });
+      return {
+        status: 'exists',
+        created: false,
+        matched_on: 'email_in_tanda',
+        active: inUse.active,
+        ...found,
+        note: 'Tanda already has a user with this email. Reactivate (rehire) them in Tanda instead of creating a new one.',
+        ...withWarnings(warnings),
+      };
+    }
     const userId = created.id;
     if (typeof userId !== 'number') {
       logger.warn(`${CREATE_USER_TOOL}: Tanda returned no user id`, { caller: client.cacheScope, source_ref: sourceRef });
       throw new TandaApiError('Tanda accepted the request but returned no user id.', 502, 'Check tanda_people (search by name) before retrying, so the user is not created twice.');
     }
     logger.info(`${CREATE_USER_TOOL} created user`, { user_id: userId, caller_user_id: await callerId(client), caller: client.cacheScope, source_ref: sourceRef });
+
+    // Tanda can keep the email but not return it to this token (#105): then our email duplicate check can't see it
+    const storedEmail = typeof created.email === 'string' ? created.email.trim().toLowerCase() : '';
+    if (storedEmail !== payload.email) {
+      warnings.push({ check: 'email', reason: 'Tanda did not return the email for the new user, so this tool\'s duplicate check can\'t match it by email (Tanda itself still refuses a second user with the same email). Check the email in Tanda.' });
+    }
 
     let invite: 'not_requested' | 'sent' | 'failed' = 'not_requested';
     if (sendInvite) {
