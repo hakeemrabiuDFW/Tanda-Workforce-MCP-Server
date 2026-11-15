@@ -153,7 +153,7 @@ MCP_URL=https://your-domain.com/mcp MCP_TOKEN=<secret> npm run smoke:writes
 
 `npm run smoke` calls all 12 read tools and the two staffing apps against a running server and prints only the shape and size of each response (no row values). It exits non-zero if a tool errors, exceeds 25 KB, or returns `date_of_birth`/`passcode`.
 
-`npm run smoke:writes` exercises every write tool with the shared secret. It creates the test hire "ZZ MCP Smoke" (`SMOKE_EMAIL`, default `zz.mcp.smoke@example.com`, no invite), checks that a duplicate is caught, updates and deactivates the hire, previews approval on an old pay period (`SMOKE_FROM`/`SMOKE_TO`), and checks that the shared token can't apply an approval. It prints step results only. The test hire always ends inactive, so it never counts towards the billed headcount. On later runs the inactive hire already exists, so the script reuses it rather than creating another: it checks that the duplicate is found, that an update to an inactive user is refused, and that the hire is still inactive. A failed step prints the tool's or Tanda's reason, not just the HTTP status.
+`npm run smoke:writes` exercises every write tool with the shared secret. Each run creates its own test hire ("ZZ MCP Smoke <run id>", `zz.mcp.smoke.<run id>@example.com`, no invite). It then checks that a duplicate is caught, updates and deactivates the hire, previews approval on an old pay period (`SMOKE_FROM`/`SMOKE_TO`), and checks that the shared token can't apply an approval. It prints step results only. The hire always ends inactive, even when a step fails, so it never counts towards the billed headcount. Each run leaves one inactive test user, because Tanda refuses to reuse an email even for an inactive user.
 
 ## Releasing
 

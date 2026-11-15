@@ -5,13 +5,13 @@
  *
  *   MCP_URL=https://<host>/mcp MCP_TOKEN=<MCP_SHARED_SECRET> node scripts/smoke-writes.mjs
  *
- * Optional: SMOKE_EMAIL (default zz.mcp.smoke@example.com), SMOKE_FROM / SMOKE_TO (old pay
- * period for the approval preview, default 2026-08-10..2026-08-23), SMOKE_REF (source_ref).
+ * Optional: SMOKE_RUN_ID (default: a timestamp), SMOKE_FROM / SMOKE_TO (old pay period for the
+ * approval preview, default 2026-08-10..2026-08-23), SMOKE_REF (source_ref).
  *
- * The test hire is always left inactive, so it never counts towards the billed headcount. On
- * later runs it already exists (inactive), so the script reuses it instead of creating another:
- * it checks the duplicate is found, that updates to an inactive user are refused, and that it
- * stays inactive.
+ * Each run creates its own test hire ("ZZ MCP Smoke <run id>", zz.mcp.smoke.<run id>@example.com)
+ * so every release exercises create, duplicate, update and deactivate in full. Tanda refuses a
+ * reused email even on an inactive user (#105). The hire is always left inactive, even when a
+ * step fails, so it never counts towards the billed headcount.
  * Exits non-zero on the first failed step. It is the staging gate before production.
  */
 const url = process.env.MCP_URL || 'http://localhost:3000/mcp';
@@ -20,8 +20,10 @@ if (!token) {
   console.error('Set MCP_TOKEN (the server\'s MCP_SHARED_SECRET).');
   process.exit(2);
 }
-const email = process.env.SMOKE_EMAIL || 'zz.mcp.smoke@example.com';
-const name = 'ZZ MCP Smoke';
+const timestamp = new Date().toISOString().replace(/\D/g, '').slice(0, 14); // e.g. 20261115154200
+const runId = (process.env.SMOKE_RUN_ID || timestamp).toLowerCase().replace(/[^a-z0-9]/g, '');
+const email = `zz.mcp.smoke.${runId}@example.com`;
+const name = `ZZ MCP Smoke ${runId}`;
 const sourceRef = process.env.SMOKE_REF || `smoke-writes ${new Date().toISOString().slice(0, 10)}`;
 const period = { from: process.env.SMOKE_FROM || '2026-08-10', to: process.env.SMOKE_TO || '2026-08-23' };
 
@@ -41,18 +43,29 @@ async function call(tool, args) {
 }
 
 let step = 0;
-function check(label, ok, detail = '') {
+let activeHireId = null; // set while the test hire is active, so a failure still deactivates it (#105)
+
+/** Never leave the test hire active (billed), even when a later step fails. */
+async function cleanup() {
+  if (activeHireId === null) return;
+  const args = { user_id: activeHireId, source_ref: `${sourceRef} cleanup` };
+  const p = await call('tanda_deactivate_user', args);
+  const done = p.body.status === 'already_inactive'
+    || (p.body.status === 'preview' && (await call('tanda_deactivate_user', { ...args, confirm_token: p.body.confirm_token })).body.status === 'deactivated');
+  console.log(done ? 'cleanup: test hire deactivated' : 'cleanup FAILED: deactivate the "ZZ MCP Smoke" user in Tanda by hand');
+}
+
+async function check(label, ok, detail = '') {
   step++;
   console.log(`${String(step).padStart(2)}. ${ok ? 'OK  ' : 'FAIL'} ${label}${detail ? `  (${detail})` : ''}`);
   if (!ok) {
+    await cleanup();
     console.log('\nwrite smoke FAILED: do not promote to production.');
     process.exit(1);
   }
 }
 const statusOf = (r) => r.body.status ?? r.body.summary?.status;
-const errorOf = (r) => String(r.body.error ?? r.body.summary?.error ?? '').slice(0, 160);
-// On an error show Tanda's reason, not the numeric HTTP status that shares the "status" key
-const detailOf = (r) => (r.isError ? errorOf(r) || 'error' : String(statusOf(r) ?? ''));
+const errorOf = (r) => String(r.body.error ?? '').slice(0, 120);
 const noPii = (r) => !/"(date_of_birth|passcode)"/.test(r.text);
 
 const listed = await fetch(url, {
@@ -64,66 +77,58 @@ const names = listed.result?.tools?.map((t) => t.name) || [];
 const writeTools = ['tanda_create_user', 'tanda_update_user', 'tanda_deactivate_user', 'tanda_approve_timesheets'];
 const missing = writeTools.filter((t) => !names.includes(t));
 console.log(`server ${url}`);
-check('write tools are listed (TANDA_WRITES_ENABLED=true)', missing.length === 0, missing.length ? `missing: ${missing.join(', ')}` : `${writeTools.length} tools`);
+await check('write tools are listed (TANDA_WRITES_ENABLED=true)', missing.length === 0, missing.length ? `missing: ${missing.join(', ')}` : `${writeTools.length} tools`);
 
 // ADR 0001: the shared identity must name the decision it carries out
 const noRef = await call('tanda_create_user', { name, email });
-check('create without source_ref is refused under the shared token', noRef.isError && /source_ref/.test(noRef.text));
+await check('create without source_ref is refused under the shared token', noRef.isError && /source_ref/.test(noRef.text));
 
-const hire = { name, email, source_ref: sourceRef };
+// The start date lets the name + start-date duplicate check match even when Tanda doesn't return the email
+const hire = { name, email, employment_start_date: '2026-01-05', source_ref: sourceRef };
 const preview = await call('tanda_create_user', hire);
-check('create preview', !preview.isError && ['preview', 'exists'].includes(statusOf(preview)) && noPii(preview), detailOf(preview));
+await check('create preview', !preview.isError && ['preview', 'exists'].includes(statusOf(preview)) && noPii(preview), statusOf(preview) || errorOf(preview));
 
 let userId;
-let active;
 if (statusOf(preview) === 'preview') {
   const created = await call('tanda_create_user', { ...hire, confirm_token: preview.body.confirm_token });
-  check('create confirm', !created.isError && created.body.status === 'created' && typeof created.body.user_id === 'number' && noPii(created), detailOf(created));
+  await check('create confirm', !created.isError && created.body.status === 'created' && typeof created.body.user_id === 'number' && noPii(created), created.body.status || errorOf(created));
   userId = created.body.user_id;
-  active = true;
+  if (typeof userId === 'number') activeHireId = userId;
+  for (const w of created.body.warnings || []) console.log(`    WARN ${w.check}: ${w.reason}`);
   const again = await call('tanda_create_user', hire);
-  check('duplicate create returns the same user', again.body.status === 'exists' && again.body.existing_user_id === userId, detailOf(again));
-} else {
-  // An earlier run's test hire: reuse it, never create a second one
-  userId = preview.body.existing_user_id;
-  active = preview.body.active !== false;
-  check('existing test hire found (earlier run), nothing created', typeof userId === 'number', `matched_on=${preview.body.matched_on}, active=${active}`);
-}
+  await check('duplicate create returns the same user', again.body.status === 'exists' && again.body.existing_user_id === userId, again.body.status || errorOf(again));
 
-const upd = { user_id: userId, employment_start_date: period.from, source_ref: sourceRef };
-const updPreview = await call('tanda_update_user', upd);
-if (active && statusOf(updPreview) === 'unchanged') {
-  // An active hire left by an interrupted run that already has this start date
-  check('update preview (already up to date)', !updPreview.isError, detailOf(updPreview));
-} else if (active) {
+  const upd = { user_id: userId, employment_start_date: period.from, source_ref: sourceRef };
+  const updPreview = await call('tanda_update_user', upd);
   const updToken = updPreview.body.summary?.confirm_token;
-  check('update preview', !updPreview.isError && statusOf(updPreview) === 'preview' && Boolean(updToken), detailOf(updPreview));
+  await check('update preview', !updPreview.isError && statusOf(updPreview) === 'preview' && Boolean(updToken), statusOf(updPreview) || errorOf(updPreview));
   const updApply = await call('tanda_update_user', { ...upd, confirm_token: updToken });
-  check('update confirm', !updApply.isError && statusOf(updApply) === 'applied' && updApply.body.summary?.succeeded === 1, detailOf(updApply));
+  await check('update confirm', !updApply.isError && statusOf(updApply) === 'applied' && updApply.body.summary?.succeeded === 1, statusOf(updApply) || errorOf(updApply));
 } else {
-  const sum = updPreview.body.summary || {};
-  check('update of an inactive user is refused (rehire first), nothing changed', !updPreview.isError && sum.status === 'nothing_to_change' && sum.refused === 1 && !sum.confirm_token && /inactive/.test(updPreview.text),
-    detailOf(updPreview));
+  userId = preview.body.existing_user_id;
+  if (preview.body.active) activeHireId = userId;
+  await check('existing test hire found (earlier run)', typeof userId === 'number', `matched_on=${preview.body.matched_on}`);
 }
 
 const deact = { user_id: userId, source_ref: sourceRef };
 const dPreview = await call('tanda_deactivate_user', deact);
 if (dPreview.body.status === 'preview') {
   const dApply = await call('tanda_deactivate_user', { ...deact, confirm_token: dPreview.body.confirm_token });
-  check('deactivate confirm', !dApply.isError && dApply.body.status === 'deactivated', detailOf(dApply));
+  await check('deactivate confirm', !dApply.isError && dApply.body.status === 'deactivated', dApply.body.status || errorOf(dApply));
+  if (dApply.body.status === 'deactivated') activeHireId = null;
 } else {
-  check('deactivate preview', dPreview.body.status === 'already_inactive', detailOf(dPreview));
+  await check('deactivate preview', dPreview.body.status === 'already_inactive', dPreview.body.status || errorOf(dPreview));
 }
 const dAgain = await call('tanda_deactivate_user', deact);
-check('test hire is inactive (not billed)', dAgain.body.status === 'already_inactive', detailOf(dAgain));
+await check('test hire is inactive (not billed)', dAgain.body.status === 'already_inactive', dAgain.body.status || errorOf(dAgain));
 
 const approve = { ...period, allow_past_period: true, source_ref: sourceRef };
 const aPreview = await call('tanda_approve_timesheets', approve);
 const s = aPreview.body.summary || {};
-check('approval preview on an old period', !aPreview.isError && ['preview', 'nothing_to_do'].includes(s.status) && noPii(aPreview),
+await check('approval preview on an old period', !aPreview.isError && ['preview', 'nothing_to_do'].includes(s.status) && noPii(aPreview),
   `${s.status ?? errorOf(aPreview)}: ${s.timesheets ?? '?'} timesheets, ${s.will_change ?? '?'} would change, ${s.flagged ?? '?'} flagged`);
-check('approval preview gives the shared token no confirm_token', aPreview.body.confirm_token === undefined);
+await check('approval preview gives the shared token no confirm_token', aPreview.body.confirm_token === undefined);
 const aApply = await call('tanda_approve_timesheets', { ...approve, confirm_token: '1.smoke' });
-check('approval apply is refused under the shared token (ADR 0001)', aApply.isError && /own Tanda login/.test(aApply.text));
+await check('approval apply is refused under the shared token (ADR 0001)', aApply.isError && /own Tanda login/.test(aApply.text));
 
 console.log('\nall write steps OK');
