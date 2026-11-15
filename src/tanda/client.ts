@@ -5,6 +5,7 @@ import { logger } from '../utils/logger';
 import { TandaTokenResponse, TandaUser, TandaDailyStats } from './types';
 import { tandaRateLimiter } from './rateLimiter';
 import { ETagCache } from './etagCache';
+import { isAllowedWrite } from '../config/writes';
 import { chunkDateRange, toUnixSeconds, addDays, DEFAULT_TIMEZONE } from '../utils/time';
 import { dedupeById, itemDate, itemHours } from './normalize';
 
@@ -90,14 +91,14 @@ export class TandaClient {
     });
 
     this.client.interceptors.request.use(async (requestConfig) => {
-      // This server is read-only: never send a mutating request to Tanda.
+      // This server is read-only apart from the allowlist in config/writes.ts (user creation).
       const method = (requestConfig.method || 'get').toLowerCase();
-      if (method !== 'get' && method !== 'head') {
+      if (method !== 'get' && method !== 'head' && !isAllowedWrite(method, requestConfig.url)) {
         throw new TandaApiError(`Read-only server: ${method.toUpperCase()} requests to Tanda are disabled`, 403);
       }
       if (!this.options.disableRateLimit) await tandaRateLimiter.acquire();
       requestConfig.headers.Authorization = `Bearer ${this.accessToken}`;
-      logger.debug(`Tanda API Request: GET ${requestConfig.url}`);
+      logger.debug(`Tanda API Request: ${method.toUpperCase()} ${requestConfig.url}`);
       return requestConfig;
     });
   }
@@ -197,6 +198,41 @@ export class TandaClient {
         throw this.toApiError(error, path);
       }
     }
+  }
+
+  /**
+   * POST to an allowlisted write endpoint. Only a 401 is retried (after a token refresh):
+   * a timeout or 5xx may have created the record, so those are never retried blindly.
+   */
+  private async post<T = unknown>(path: string, body: Rec): Promise<T> {
+    let refreshed = false;
+    for (;;) {
+      try {
+        return (await this.client.post<T>(path, body)).data;
+      } catch (error) {
+        const status = (error as AxiosError).response?.status;
+        if (status === 401 && !refreshed && (this.refreshToken || this.options.refresh)) {
+          refreshed = true;
+          try {
+            await this.refreshAccessToken();
+            continue;
+          } catch {
+            /* fall through to error mapping */
+          }
+        }
+        throw this.toApiError(error, path);
+      }
+    }
+  }
+
+  /** POST /users. Needs TANDA_WRITES_ENABLED=true and the "user" scope. */
+  async createUser(body: Rec): Promise<Rec> {
+    return this.post<Rec>('/users', body);
+  }
+
+  /** POST /users/{id}/invite: emails the user an invite to Tanda. */
+  async inviteUser(userId: number): Promise<void> {
+    await this.post(`/users/${userId}/invite`, {});
   }
 
   private async getList<T = Rec>(path: string, params: Record<string, string | undefined> = {}, opts: GetOptions = {}): Promise<T[]> {

@@ -21,12 +21,13 @@ Two credentials are accepted as `Authorization: Bearer <token>`:
 
 Shared-secret auth is off unless both variables are set. The comparison is constant-time.
 
-## Read-only
+## Read-only, with one exception
 
-The server never writes to Tanda:
+The server does not write to Tanda, with one exception, user creation (#84):
 
-- The Tanda HTTP client rejects any verb other than `GET`/`HEAD` before the request leaves the process.
-- No tool exposes a write action.
+- The Tanda HTTP client rejects any verb other than `GET`/`HEAD` before the request leaves the process. The only exceptions are `POST /users` and `POST /users/{id}/invite`, listed in `src/config/writes.ts`. Those are refused as well unless `TANDA_WRITES_ENABLED=true`, which is off by default.
+- The only tool that writes is `tanda_create_user`. It is not listed while writes are off. It needs a preview followed by a second call with an HMAC `confirm_token` (signed with `JWT_SECRET`, bound to the arguments and the caller's Tanda token, valid for 15 minutes). It refuses duplicates, sends only a fixed whitelist of fields (no wage, DOB, passcode, tax, bank or role fields), can only set the `employee` level, and logs each creation with the caller and `source_ref`.
+- Writes are never retried after a timeout or 5xx, because the record may already exist. Only a 401 is retried, after a token refresh.
 
 ## Tanda OAuth scopes (least privilege)
 

@@ -1,11 +1,11 @@
 # Tanda Workforce MCP Server v4.0.1
 
-A **read-only** MCP (Model Context Protocol) server for the Tanda / Workforce.com API. It exposes 12 consolidated tools. Every tool is privacy-filtered and returns at most 25 KB, so assistants like Claude can answer workforce questions without overflowing their context.
+A read-only MCP (Model Context Protocol) server for the Tanda / Workforce.com API, with one guarded exception: creating new employees. It exposes 12 consolidated read tools, plus `tanda_create_user` when `TANDA_WRITES_ENABLED=true`. Every tool is privacy-filtered and returns at most 25 KB, so assistants like Claude can answer workforce questions without overflowing their context.
 
 ## Security
 
 - **Auth on every MCP route.** `POST /mcp`, `GET /mcp` and `POST /` require an OAuth JWT or `Authorization: Bearer <MCP_SHARED_SECRET>`. Unauthenticated calls get `401`.
-- **Read-only.** The Tanda client refuses any non-GET request.
+- **Read-only, with one exception.** The Tanda client refuses any non-GET request except `POST /users` and `POST /users/{id}/invite`, and refuses those too unless `TANDA_WRITES_ENABLED=true` (off by default).
 - **Least-privilege scopes.** The server requests `me roster timesheet department user cost leave`. It never requests `financial` or `personal`. `unavailability` is off by default because Workforce.com's OAuth fails when it is requested; add it to `TANDA_SCOPES` only if your OAuth app supports it.
 - **Privacy by default.** User records are whitelisted, and `date_of_birth`, `phone`, `email`, `legal_*` and `hourly_rate` are returned only when the `fields` parameter names them. `passcode`, `tax_*`, `bank_*` and `super_*` are never returned.
 
@@ -29,6 +29,15 @@ Every list tool returns `{ summary, rows, page }`. `rows` holds at most 50 entri
 | `tanda_exceptions` | Audit list: shifts open more than 12h, zero-length shifts, pending leave already in the past, unapproved timesheet $ by site, active staff with no award template, calendar workweeks over 40h, and `projected_over_40` for the current week (worked + still rostered). Weekly checks echo `week_basis` and each week's range. Unapproved cost is reported for the window (`window_unapproved_cost`) and for every pay period that has ended or is current (`all_open_periods_unapproved_cost`, `pending_open_periods`; looks back `OPEN_PERIOD_LOOKBACK_DAYS`, default 42). |
 | `tanda_export_preview` | Payroll export preview with `approved_only=true` and a hard-coded `skip_status_update=true`. Returns row count, totals and rows missing a pay code. Never returns the raw file. |
 | `tanda_change_history` | Version history from `/shifts/{id}/versions` or `/schedules/{id}/versions`. |
+
+### Creating employees (`tanda_create_user`, off by default)
+
+Only listed and callable when `TANDA_WRITES_ENABLED=true`. It creates a plain employee (`POST /users`, `user` scope) in two calls:
+
+1. Call with `name`, `email` and optionally `phone`, `employment_start_date`, `department_ids`, `award_template_id` (default 42, or `TANDA_DEFAULT_AWARD_TEMPLATE_ID`), `send_invite` and `source_ref` (e.g. the Monday item id). Nothing is created. The response is `status: "preview"` with the exact `payload` and a `confirm_token` valid for 15 minutes. Add `fields: ["email","phone"]` to see those in the preview.
+2. Call again with the same arguments plus `confirm_token`. The response is `status: "created"` with `user_id`, the user as `tanda_people` returns it, and `invite` (`not_requested`, `sent` or `failed`; a failed invite is a warning, not an error).
+
+The token is bound to the arguments and to the Tanda identity that asked for the preview. Changed arguments, another identity or an expired token are refused. Both calls first check for duplicates among active and inactive users. A user with the same email, or with the same name and start date, returns `status: "exists"` with `existing_user_id` and creates nothing. Unknown `department_ids` are refused. Only the `employee` level can be set, and wage, date of birth, passcode, tax, bank and role fields are never sent. Each creation is logged with the new user id, the caller's Tanda user id and `source_ref`.
 
 A **supervisor** is any user rostered to a department named `Supervisor` or `Supervisors` (case-insensitive). The **bookkeeping sites** 281737 (One Time Projects), 301754 (Floater) and 396358 (MCP Test) are flagged, and analytics tools exclude them by default.
 
@@ -67,6 +76,8 @@ npm run build && npm start
 | `TANDA_BOOKKEEPING_LOCATION_IDS` | no | Default `281737,301754,396358` |
 | `TANDA_RATE_LIMIT_PER_MIN` | no | Client-side limit, default 80 (Tanda allows 100/min shared across password tokens) |
 | `MCP_LIST_ALIASES` | no | `true` lists the deprecated names in `tools/list` |
+| `TANDA_WRITES_ENABLED` | no | `true` turns on `tanda_create_user`. Off by default |
+| `TANDA_DEFAULT_AWARD_TEMPLATE_ID` | no | Award template for new users when none is given. Default 42 |
 
 ## Connecting to Claude
 
@@ -93,7 +104,7 @@ npm run build
 MCP_URL=https://your-domain.com/mcp MCP_TOKEN=<secret> npm run smoke [from] [to]
 ```
 
-`npm run smoke` calls all 12 tools against a running server and prints only the shape and size of each response (no row values). It exits non-zero if a tool errors, exceeds 25 KB, or returns `date_of_birth`/`passcode`.
+`npm run smoke` calls all 12 read tools against a running server and prints only the shape and size of each response (no row values). It exits non-zero if a tool errors, exceeds 25 KB, or returns `date_of_birth`/`passcode`.
 
 ## Releasing
 
