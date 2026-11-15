@@ -72,7 +72,7 @@ Sets `hourly_rate`, `award_template_id`, `employment_start_date`, `department_id
 
 ### Approving timesheets (`tanda_approve_timesheets`, off by default)
 
-Approves Tanda timesheets for a pay period, or returns them to pending (`action: "unapprove"`). It needs a person's own Tanda login: calls made with the shared server token (`MCP_SHARED_SECRET` + `TANDA_ACCESS_TOKEN`) are refused, so Tanda's history always shows who approved.
+Approves Tanda timesheets for a pay period, or returns them to pending (`action: "unapprove"`). Applying needs a person's own Tanda login, so Tanda's history always shows who approved. The shared server token (`MCP_SHARED_SECRET` + `TANDA_ACCESS_TOKEN`) can only preview: it gets no `confirm_token`, and an apply is refused. The staging release gate uses that preview ([ADR 0001](docs/adr/0001-write-tool-identity.md)).
 
 1. Call with `from`/`to` (the pay period) and optionally `timesheet_ids`, `user_ids` or `location_ids`. Nothing changes. Each timesheet row shows `will_change` or a `skip_reason`, any data-quality `flags`, and the `shift_changes` that would be made. A `confirm_token` comes back with the preview.
 2. Repeat the call with `confirm_token`. Each timesheet's shift changes are applied first, then its status. A failure on one timesheet is reported in its row (`outcome: "failed"`), and the others carry on.
