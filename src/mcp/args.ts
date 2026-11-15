@@ -98,3 +98,15 @@ export function updatedAfter(value: unknown): string | undefined {
   if (secs === null) throw new ArgError('updated_after must be unix seconds or an ISO date/time.');
   return String(secs);
 }
+
+export const MAX_HOURLY_RATE = 100;
+
+/** Optional hourly pay rate (#94): above 0, at most MAX_HOURLY_RATE, rounded to cents. */
+export function parseHourlyRate(value: unknown, name = 'hourly_rate'): number | undefined {
+  if (value === undefined || value === null || value === '') return undefined;
+  const rate = num(value);
+  if (rate === undefined || !(rate > 0) || rate > MAX_HOURLY_RATE) {
+    throw new ArgError(`${name} must be a number above 0 and at most ${MAX_HOURLY_RATE}.`);
+  }
+  return Math.round(rate * 100) / 100;
+}

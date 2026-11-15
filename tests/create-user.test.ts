@@ -180,7 +180,7 @@ describe('tanda_create_user', () => {
 
   it('ignores wage, DOB and role fields passed as arguments', async () => {
     const { client, requests } = tanda();
-    const extra = { hourly_rate: 30, date_of_birth: '1990-01-01', passcode: '1', managed_department_ids: [1] };
+    const extra = { date_of_birth: '1990-01-01', passcode: '1', managed_department_ids: [1] };
     const preview = await run(client, { ...hire, ...extra });
     await run(client, { ...hire, ...extra, confirm_token: preview.content.confirm_token });
     const body = posts(requests)[0].body as Record<string, unknown>;
@@ -225,7 +225,7 @@ describe('write allowlist in the Tanda client', () => {
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     const axiosInstance = (client as any).client;
     await expect(axiosInstance.post('/schedules', {})).rejects.toThrow(/Read-only/);
-    await expect(axiosInstance.put('/users/1', {})).rejects.toThrow(/Read-only/);
+    await expect(axiosInstance.put('/users/1/rates', {})).rejects.toThrow(/Read-only/); // PUT /users/{id} is allowlisted (#94)
     await expect(axiosInstance.delete('/users/1/alternate_rates')).rejects.toThrow(/Read-only/);
     await expect(axiosInstance.delete('/schedules/1')).rejects.toThrow(/Read-only/);
     await expect(axiosInstance.post('/users/1/onboard', {})).rejects.toThrow(/Read-only/);

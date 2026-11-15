@@ -7,6 +7,7 @@ import { itemDate, itemHours } from '../../tanda/normalize';
 import { addDays, round2, todayInZone, toUnixSeconds, toZonedISO } from '../../utils/time';
 import { OPEN_SHIFT_FLAG_HOURS } from './live';
 import { workweek } from '../workweek';
+import { soft, Warning, withWarnings } from '../warnings';
 
 export const CHECKS = [
   'open_shift_over_12h',
@@ -14,6 +15,7 @@ export const CHECKS = [
   'stale_pending_leave',
   'unapproved_timesheet_cost',
   'missing_award_template',
+  'missing_pay_rate',
   'weekly_hours_over_40',
   'projected_over_40',
 ] as const;
@@ -56,7 +58,7 @@ function exposure(sheets: Array<{ ts: Rec; cost: number; hours: number }>): Expo
 export const exceptionsTool: Tool = {
   name: 'tanda_exceptions',
   description:
-    'Returns payroll/compliance exceptions: shifts open > 12h, zero-length shifts, pending leave already in the past, unapproved timesheet $ by site, active staff with no award template, and > 40h calendar workweeks (worked, and projected for the current week); use it as a daily/weekly audit.',
+    'Returns payroll/compliance exceptions: shifts open > 12h, zero-length shifts, pending leave already in the past, unapproved timesheet $ by site, active staff with no award template or pay rate, and > 40h calendar workweeks (worked, and projected for the current week); use it as a daily/weekly audit.',
   inputSchema: {
     type: 'object',
     properties: {
@@ -269,7 +271,24 @@ export const exceptionsTool: Tool = {
       }
     }
 
-    return guardResponse({ from, to, checks, total: rows.length, by_type: counts, ...extra }, rows, {
+    const warnings: Warning[] = [];
+    if (want('missing_pay_rate')) {
+      // #94: staff with no rate cost $0 on every timesheet. Wages only come back with the "cost" scope.
+      const withWages = await soft(warnings, 'missing_pay_rate', [] as Rec[], () => client.getUsers({ show_wages: true, freshMs: 60_000 }));
+      const employees = withWages.filter((u) => u.active !== false && Array.isArray(u.user_levels) && u.user_levels.length > 0
+        && (u.user_levels as unknown[]).every((l) => String(l).toLowerCase() === 'employee'));
+      if (withWages.length && !withWages.some((u) => 'hourly_rate' in u)) {
+        warnings.push({ check: 'missing_pay_rate', reason: 'missing scope: cost' });
+      } else {
+        for (const u of employees) {
+          if (typeof u.hourly_rate === 'number' && u.hourly_rate > 0) continue;
+          if (deptFilter && !((u.department_ids as number[]) || []).some((d) => deptFilter.has(d))) continue;
+          add('missing_pay_rate', { user_id: u.id, user_name: u.name, employment_start_date: u.employment_start_date ?? null });
+        }
+      }
+    }
+
+    return guardResponse({ from, to, checks, total: rows.length, by_type: counts, ...extra, ...withWarnings(warnings) }, rows, {
       offset: args.offset,
       pageSize: args.limit,
     });

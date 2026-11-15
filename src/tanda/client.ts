@@ -247,6 +247,11 @@ export class TandaClient {
     return this.write<Rec>('delete', `/users/${userId}`);
   }
 
+  /** PUT /users/{id}, limited by tanda_update_user to pay rate, award template, start date, teams and employee id. */
+  async updateUser(userId: number, body: Rec): Promise<Rec> {
+    return this.write<Rec>('put', `/users/${userId}`, body);
+  }
+
   /** PUT /timesheets/{id}: approve, or return to pending. Never "exported" (that locks costs). */
   async setTimesheetStatus(timesheetId: number, status: 'approved' | 'pending'): Promise<Rec> {
     return this.write<Rec>('put', `/timesheets/${timesheetId}`, { status });

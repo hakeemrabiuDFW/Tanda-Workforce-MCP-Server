@@ -23,7 +23,7 @@ export const deactivateUserTool: Tool = {
     type: 'object',
     properties: {
       user_id: { type: 'number', description: 'User to deactivate (required)' },
-      source_ref: { type: 'string', description: 'Audit reference, e.g. the Monday item id' },
+      source_ref: { type: 'string', description: 'Audit reference, e.g. the Monday item id. Required when called with the shared server token (ADR 0001)' },
       dry_run: { type: 'boolean', description: 'Preview only. Default true without confirm_token, false with it' },
       confirm_token: { type: 'string', description: 'Token from the preview; deactivates the user' },
     },
@@ -35,6 +35,10 @@ export const deactivateUserTool: Tool = {
     }
     const userId = requireId(args.user_id, 'user_id');
     const sourceRef = text(args.source_ref, 'source_ref', 100);
+    // ADR 0001: under the shared identity, name the decision this write carries out
+    if (client.isSharedIdentity && !sourceRef) {
+      throw new ArgError(`${DEACTIVATE_USER_TOOL} needs source_ref (e.g. the Monday item id) when called with the shared server token. See docs/adr/0001-write-tool-identity.md.`);
+    }
     const token = typeof args.confirm_token === 'string' && args.confirm_token.trim() ? args.confirm_token.trim() : undefined;
     const dryRun = bool(args.dry_run, !token);
 
