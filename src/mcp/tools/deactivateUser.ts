@@ -23,7 +23,7 @@ export const deactivateUserTool: Tool = {
     type: 'object',
     properties: {
       user_id: { type: 'number', description: 'User to deactivate (required)' },
-      source_ref: { type: 'string', description: 'Audit reference, e.g. the Monday item id' },
+      source_ref: { type: 'string', description: 'Audit reference, e.g. the Monday item id. Required when called with the shared server token (ADR 0001)' },
       dry_run: { type: 'boolean', description: 'Preview only. Default true without confirm_token, false with it' },
       confirm_token: { type: 'string', description: 'Token from the preview; deactivates the user' },
     },

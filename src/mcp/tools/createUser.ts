@@ -109,7 +109,7 @@ export const createUserTool: Tool = {
       award_template_id: { type: 'number', description: 'Award template (default 42, or TANDA_DEFAULT_AWARD_TEMPLATE_ID)' },
       user_levels: { type: 'array', items: { type: 'string' }, description: 'Default ["employee"]; only "employee" is allowed' },
       send_invite: { type: 'boolean', description: 'Email the Tanda invite after creating (default false)' },
-      source_ref: { type: 'string', description: 'Audit reference, e.g. the Monday item id' },
+      source_ref: { type: 'string', description: 'Audit reference, e.g. the Monday item id. Required when called with the shared server token (ADR 0001)' },
       dry_run: { type: 'boolean', description: 'Preview only. Default true without confirm_token, false with it' },
       confirm_token: { type: 'string', description: 'Token from the preview; creates the user' },
       fields: { type: 'array', items: { type: 'string' }, description: 'Add email and/or phone to echo them in the preview' },
