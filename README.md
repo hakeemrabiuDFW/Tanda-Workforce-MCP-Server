@@ -1,6 +1,6 @@
 # Tanda Workforce MCP Server v4.0.1
 
-A read-only MCP (Model Context Protocol) server for the Tanda / Workforce.com API, with four guarded exceptions: creating employees, deactivating them, updating their pay rate and similar fields, and approving timesheets. It exposes 12 consolidated read tools, plus four write tools (`tanda_create_user`, `tanda_deactivate_user`, `tanda_update_user`, `tanda_approve_timesheets`) when `TANDA_WRITES_ENABLED=true`. Every tool is privacy-filtered and returns at most 25 KB, so assistants like Claude can answer workforce questions without overflowing their context.
+A read-only MCP (Model Context Protocol) server for the Tanda / Workforce.com API, with four guarded exceptions: creating employees, deactivating them, updating their pay rate and similar fields, and approving timesheets. It exposes 12 consolidated read tools and two read-only staffing apps (interactive MCP App views), plus four write tools (`tanda_create_user`, `tanda_deactivate_user`, `tanda_update_user`, `tanda_approve_timesheets`) when `TANDA_WRITES_ENABLED=true`. Every tool is privacy-filtered and returns at most 25 KB, so assistants like Claude can answer workforce questions without overflowing their context.
 
 ## Security
 
@@ -31,6 +31,27 @@ Every list tool returns `{ summary, rows, page }`. `rows` holds at most 50 entri
 | `tanda_exceptions` | Audit list: shifts open more than 12h, zero-length shifts, pending leave already in the past, unapproved timesheet $ by site, active staff with no award template, calendar workweeks over 40h, and `projected_over_40` for the current week (worked + still rostered). Weekly checks echo `week_basis` and each week's range. Unapproved cost is reported for the window (`window_unapproved_cost`) and for every pay period that has ended or is current (`all_open_periods_unapproved_cost`, `pending_open_periods`; looks back `OPEN_PERIOD_LOOKBACK_DAYS`, default 42). |
 | `tanda_export_preview` | Payroll export preview with `approved_only=true` and a hard-coded `skip_status_update=true`. Returns row count, totals and rows missing a pay code. Never returns the raw file. |
 | `tanda_change_history` | Version history from `/shifts/{id}/versions` or `/schedules/{id}/versions`. |
+
+### Staffing apps (`conversation_to_site_schedule`, `staff_allocation_board`)
+
+Two read-only tools that render an interactive view in hosts that support [MCP Apps](https://github.com/modelcontextprotocol/ext-apps) (Claude does). Each returns a plain-text summary in `content` and the data in `structuredContent`; a host without MCP Apps still gets the summary. They only `GET` `/locations`, `/departments`, `/users` and `/schedules`. Nothing is written to Tanda, no shift is published and nobody is notified.
+
+| Tool | Returns / when to use |
+|------|----------------------|
+| `conversation_to_site_schedule` | A draft weekly plan for a site from the fields of a client conversation: days, start and end time, cleaners per shift, supervisor checks, weekly and monthly labor hours, the Tanda site it matches by name, and suggested cleaners, supervisor and trainer. `route_location` carries the matching Route location when the assistant looked it up with a Route connector (this server cannot reach Route). |
+| `staff_allocation_board` | A board of supervisors, trainers, cleaners and trainees to assign to a site, with a suggested team. `sort_by` (`load`, `tenure`, `name`) and `min_tenure_months` order and filter it; the view has the same controls. |
+
+How people are described and chosen:
+
+- **Tenure** is whole years and months since `employment_start_date`, shown on every person as `tenure` (`years`, `months`, `total_months`) and `tenure_label` (for example `3y 2m`). Someone with no start date has `tenure: null` and is never counted as experienced.
+- **Load** is the hours rostered for the whole target workweek (`WORKWEEK_START`), read from every shift in that week, not one day or one page. The week is the one containing `week_of`, or the one containing tomorrow.
+- **Supervisor**: on the staff list of a `Supervisor`/`Supervisors` department, or with a user level containing `manager` or `supervisor`. `COVERAGE_EXCLUDE_USER_IDS` are left out.
+- **Trainer**: the users in `TRAINER_USER_IDS` when it is set, otherwise staff of an `Ambassador` or `TRAINING` department; either way only those with 12 or more months of tenure.
+- **Trainee**: under 3 months of tenure. Everyone else is a **cleaner**.
+- **Suggestions**: the lowest load first, and people the new site would push past 40 hours last. The first cleaner is the **lead** and has 12 or more months of tenure when anyone does. The trainer always has 12 or more months: a `TRAINER_USER_IDS` person with less is left off the trainer list and named in `warnings`. A site that already exists in Tanda gets no trainer in `conversation_to_site_schedule`.
+- **Names** are first name plus last initial.
+
+The views are served as `ui://tanda-workforce/schedule.html` and `ui://tanda-workforce/allocation.html` (`text/html;profile=mcp-app`). They contain no Tanda data, load nothing from the network (their CSP declares no domains) and need the same auth as every other MCP method.
 
 ### Creating employees (`tanda_create_user`, off by default)
 
@@ -94,6 +115,7 @@ npm run build && npm start
 | `COVERAGE_EXCLUDE_USER_IDS` | no | Comma-separated user ids never counted or suggested as supervisors (e.g. bookkeeping and admin-only users) |
 | `COVERAGE_SUPERVISION_MODEL` | no | Default `supervision_model` for `tanda_coverage`: `site` (default) or `roving` |
 | `COVERAGE_ROVING_SITES` | no | Sites one roving supervisor covers at once. Default 5 |
+| `TRAINER_USER_IDS` | no | Comma-separated Tanda user ids who may train at a new site (`conversation_to_site_schedule`, `staff_allocation_board`). Unset: Ambassador/TRAINING department staff with 12+ months of tenure |
 | `WORKWEEK_START` | no | First day of the overtime workweek (`SUN`…`SAT`). Default `MON` |
 | `OPEN_PERIOD_LOOKBACK_DAYS` | no | How far back `tanda_exceptions` looks for still-pending pay periods. Default 42 |
 | `TANDA_BOOKKEEPING_LOCATION_IDS` | no | Default `281737,301754,396358` |
@@ -122,12 +144,13 @@ npm run build && npm start
 ## Development
 
 ```bash
+npx playwright install chromium   # once: the MCP App view tests render the pages headless
 npm test          # unit + integration tests (Tanda stubbed; includes an 84-site / 70-user size check)
 npm run build
 MCP_URL=https://your-domain.com/mcp MCP_TOKEN=<secret> npm run smoke [from] [to]
 ```
 
-`npm run smoke` calls all 12 read tools against a running server and prints only the shape and size of each response (no row values). It exits non-zero if a tool errors, exceeds 25 KB, or returns `date_of_birth`/`passcode`.
+`npm run smoke` calls all 12 read tools and the two staffing apps against a running server and prints only the shape and size of each response (no row values). It exits non-zero if a tool errors, exceeds 25 KB, or returns `date_of_birth`/`passcode`.
 
 ## Releasing
 
