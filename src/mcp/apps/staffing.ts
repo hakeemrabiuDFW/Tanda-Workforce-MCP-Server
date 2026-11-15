@@ -275,7 +275,11 @@ export function recommend(staffing: Staffing, need: Need, siteHours = 0): Recomm
   const supervisor = byLoad(staffing.pools.supervisor).slice(0, need.supervisor).map((p) => ({ ...p, why: `Lowest supervisor load: ${loadNote(p)}` }));
   if (supervisor.length < need.supervisor) warnings.push('No supervisor found in a Supervisor department or with a manager level.');
 
-  const trainerPool = [...staffing.pools.trainer].sort((a, b) => a.week_hours - b.week_hours || months(b) - months(a));
+  // Someone who is both a supervisor and a trainer is only suggested for one role when another trainer exists
+  const supIds = new Set(supervisor.map((p) => p.id));
+  const trainerPool = [...staffing.pools.trainer].sort(
+    (a, b) => Number(supIds.has(a.id)) - Number(supIds.has(b.id)) || a.week_hours - b.week_hours || months(b) - months(a)
+  );
   const trainer = trainerPool.slice(0, need.trainer).map((p) => ({ ...p, why: `Trainer: ${loadNote(p)}` }));
   if (trainer.length < need.trainer) warnings.push(`No trainer with ${MIN_EXPERIENCED_MONTHS}+ months tenure found (${staffing.trainer_source}).`);
   if (staffing.trainers_too_new.length) {

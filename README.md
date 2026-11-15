@@ -144,6 +144,7 @@ npm run build && npm start
 ## Development
 
 ```bash
+npx playwright install chromium   # once: the MCP App view tests render the pages headless
 npm test          # unit + integration tests (Tanda stubbed; includes an 84-site / 70-user size check)
 npm run build
 MCP_URL=https://your-domain.com/mcp MCP_TOKEN=<secret> npm run smoke [from] [to]

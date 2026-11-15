@@ -11,6 +11,7 @@ import { APP_MIME_TYPE, renderAppHtml } from '../src/mcp/apps/ui';
 import { addDays, todayInZone } from '../src/utils/time';
 import { fixtureClient, FIXTURE_FROM } from './helpers/fixture';
 import { byteSize, MAX_BYTES } from '../src/mcp/guard';
+import { chromium, Browser } from 'playwright';
 
 const AUTH = `Bearer ${process.env.MCP_SHARED_SECRET}`;
 const WEEK = { from: '2026-10-12', to: '2026-10-18' };
@@ -90,6 +91,7 @@ const ids = (list: Body[]) => list.map((p) => p.id);
 
 describe('tenure', () => {
   it('counts whole years and months from the start date', () => {
+    expect(tenureFrom('2024-05-06', '2026-11-15')).toMatchObject({ years: 2, months: 6, total_months: 30, label: '2y 6m' }); // the case in #96
     expect(tenureFrom('2023-03-15', '2026-05-15')).toEqual({ years: 3, months: 2, total_months: 38, label: '3y 2m' });
     expect(tenureFrom('2023-03-15', '2026-05-14')).toMatchObject({ years: 3, months: 1, total_months: 37 });
     expect(tenureFrom('2025-11-15', '2026-11-15')).toMatchObject({ years: 1, months: 0, label: '1y' });
@@ -192,6 +194,18 @@ describe('staff_allocation_board', () => {
       expect(c.recommendation.trainer).toHaveLength(0);
       expect(c.warnings.join(' ')).toMatch(/No trainer with 12\+ months tenure found/);
       expect(res.summary).toContain('trainer none');
+    } finally {
+      delete process.env.TRAINER_USER_IDS;
+    }
+  });
+
+  it('does not suggest the same person as supervisor and trainer when another trainer exists', async () => {
+    // Blake (supervisor, 0 h) is also on the TRAINER_USER_IDS list, next to Emery (4 h)
+    process.env.TRAINER_USER_IDS = '2, 5';
+    try {
+      const { c } = await board();
+      expect(ids(c.recommendation.supervisor)).toEqual([2]);
+      expect(ids(c.recommendation.trainer)).toEqual([5]);
     } finally {
       delete process.env.TRAINER_USER_IDS;
     }
@@ -352,4 +366,66 @@ describe('MCP Apps protocol', () => {
     expect(html).not.toContain('</script><script>alert(1)');
     expect(html).toContain('\\u003c/script>');
   });
+});
+
+describe('MCP App views in a browser', () => {
+  let browser: Browser;
+  beforeAll(async () => { browser = await chromium.launch(); }, 30000);
+  afterAll(async () => { await browser?.close(); });
+
+  /** Loads a view the way a host does (no embedded data), sends it a tool result, and collects errors and posted messages. */
+  async function open(view: 'schedule' | 'allocation', structuredContent: Body) {
+    const page = await browser.newPage();
+    const errors: string[] = [];
+    page.on('pageerror', (e) => errors.push(e.message));
+    page.on('console', (m) => { if (m.type() === 'error') errors.push(m.text()); });
+    await page.setContent(renderAppHtml(view));
+    // Strings, because the test tsconfig has no DOM types; this code runs in the page
+    await page.evaluate('window.posted = []; window.addEventListener("message", (e) => window.posted.push(e.data));');
+    await page.evaluate(`window.postMessage(${JSON.stringify({ jsonrpc: '2.0', method: 'ui/notifications/tool-result', params: { content: [], structuredContent } })}, '*')`);
+    await page.waitForSelector('h1');
+    const posted = async (): Promise<Body[]> => (await page.evaluate('window.posted')) as Body[];
+    const sentToChat = async (): Promise<Body> => {
+      // postMessage is delivered asynchronously
+      await page.waitForFunction('window.posted.some((m) => m && m.method === "ui/message")', undefined, { timeout: 3000 }).catch(() => undefined);
+      const m = (await posted()).find((x) => x.method === 'ui/message');
+      if (!m) throw new Error('nothing was sent with ui/message');
+      return m;
+    };
+    return { page, errors, sentToChat };
+  }
+
+  it('renders the schedule view without page errors', async () => {
+    const { client } = staffingClient();
+    const res = await executeTool(client, 'conversation_to_site_schedule', { site_name: 'Cedar Clinic', days: ['Mon', 'Wed'], cleaners_needed: 2, week_of: WEEK.from });
+    const { page, errors, sentToChat } = await open('schedule', res.content as Body);
+    expect(await page.textContent('h1')).toContain('Cedar Clinic');
+    expect(await page.locator('table tr').count()).toBe(1 + 4 + 2); // header, 2 days x 2 cleaners, 2 supervisor checks
+    expect(await page.textContent('body')).toContain('site not created');
+    await page.click('#alloc');
+    const sent = await sentToChat();
+    expect(sent.params.content[0].text).toContain('staff allocation board for Cedar Clinic');
+    expect(errors).toEqual([]);
+    await page.close();
+  }, 30000);
+
+  it('renders the allocation board, taps people and sends the team to chat, without page errors', async () => {
+    const { res } = await board({ cleaners_needed: 2 });
+    const { page, errors, sentToChat } = await open('allocation', res.content as Body);
+    expect(await page.textContent('h1')).toContain('Staff allocation');
+    expect(await page.locator('#pools .chip.on').count()).toBe(4); // 2 cleaners, supervisor, trainer pre-picked
+    await page.locator('#pools .chip[data-k="trainee:8"]').click();
+    expect(await page.locator('#pools .chip.on').count()).toBe(5);
+    await page.selectOption('#minten', '12');
+    expect(await page.locator('#pools .chip[data-k="cleaner:7"]').count()).toBe(1); // picked, so kept by the filter
+    expect(await page.locator('#pools .chip[data-k="cleaner:9"]').count()).toBe(0); // no start date, filtered out
+    await page.selectOption('#sort', 'tenure');
+    await page.click('#done');
+    const sent = await sentToChat();
+    expect(sent.params.role).toBe('user');
+    expect(sent.params.content[0].text).toMatch(/trainers: Jules F\. \(1y 6m tenure, 3 h this week\)/);
+    expect(sent.params.content[0].text).toContain('Do not write anything to Tanda');
+    expect(errors).toEqual([]);
+    await page.close();
+  }, 30000);
 });
