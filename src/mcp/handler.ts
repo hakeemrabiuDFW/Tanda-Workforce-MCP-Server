@@ -5,6 +5,10 @@ import { executeTool, getAvailableTools, finalizeContent, isKnownTool } from './
 import { TandaApiError } from '../tanda/client';
 import { pickUserFields } from './privacy';
 import { TandaClient } from '../tanda/client';
+import { appResourceContents, appResources, viewForUri } from './apps/ui';
+
+/** MCP protocol versions this server answers to; the newest is offered to a client that asks for any other. */
+const PROTOCOL_VERSIONS = ['2024-11-05', '2025-03-26', '2025-06-18', '2025-11-25'];
 
 // MCP Protocol Types
 interface MCPRequest {
@@ -99,7 +103,11 @@ export class MCPHandler {
       jsonrpc: '2.0',
       id: request.id,
       result: {
-        protocolVersion: '2024-11-05',
+        // structuredContent (which the MCP App tools return) arrived in 2025-06-18, so the
+        // client's own version is echoed when this server knows it.
+        protocolVersion: PROTOCOL_VERSIONS.includes(String(request.params?.protocolVersion))
+          ? String(request.params?.protocolVersion)
+          : PROTOCOL_VERSIONS[PROTOCOL_VERSIONS.length - 1],
         serverInfo: {
           name: this.serverName,
           version: this.serverVersion,
@@ -171,9 +179,11 @@ export class MCPHandler {
         content: [
           {
             type: 'text',
-            text: JSON.stringify(result.content),
+            // MCP App tools: a readable summary here, the data itself in structuredContent
+            text: result.summary ?? JSON.stringify(result.content),
           },
         ],
+        ...(result.summary ? { structuredContent: result.content } : {}),
         isError: result.isError,
       },
     };
@@ -198,6 +208,7 @@ export class MCPHandler {
             description: 'Information about the currently authenticated user',
             mimeType: 'application/json',
           },
+          ...appResources(),
         ],
       },
     };
@@ -224,6 +235,12 @@ export class MCPHandler {
         MCP_ERROR_CODES.INVALID_REQUEST,
         'Authentication required'
       );
+    }
+
+    // MCP App views: static HTML with no Tanda data in it
+    const view = viewForUri(params.uri);
+    if (view) {
+      return { jsonrpc: '2.0', id: request.id, result: { contents: [appResourceContents(view)] } };
     }
 
     try {
