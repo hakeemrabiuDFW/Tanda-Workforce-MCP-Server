@@ -34,8 +34,8 @@ beforeAll(() => {
 });
 
 describe('tool surface', () => {
-  it('exposes the 12 v4 read tools plus the three write tools', () => {
-    expect(tandaTools.map((t) => t.name)).toEqual([...EXPECTED, 'tanda_create_user', 'tanda_deactivate_user', 'tanda_approve_timesheets']);
+  it('exposes the 12 v4 read tools, the two staffing app tools, plus the three write tools', () => {
+    expect(tandaTools.map((t) => t.name)).toEqual([...EXPECTED, 'conversation_to_site_schedule', 'staff_allocation_board', 'tanda_create_user', 'tanda_deactivate_user', 'tanda_approve_timesheets']);
   });
 
   it('has a one-sentence description for every tool', () => {

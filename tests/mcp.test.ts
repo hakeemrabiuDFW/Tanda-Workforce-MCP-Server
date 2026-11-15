@@ -112,7 +112,7 @@ describe('MCP Protocol Endpoints', () => {
           })
           .expect(200);
 
-        expect(response.body.result.tools.length).toBe(12);
+        expect(response.body.result.tools.length).toBe(14);
       });
 
       it('should include expected v4.0 consolidated tools', async () => {
@@ -131,6 +131,7 @@ describe('MCP Protocol Endpoints', () => {
           'tanda_org', 'tanda_people', 'tanda_schedules', 'tanda_timesheets', 'tanda_live', 'tanda_time_off',
           'tanda_labor_summary', 'tanda_coverage', 'tanda_validate_schedule', 'tanda_exceptions',
           'tanda_export_preview', 'tanda_change_history',
+          'conversation_to_site_schedule', 'staff_allocation_board',
         ]);
       });
 
@@ -389,7 +390,7 @@ describe('MCP v4.0 Features', () => {
         })
         .expect(200);
 
-      expect(response.body.result.tools.length).toBe(12);
+      expect(response.body.result.tools.length).toBe(14);
     });
 
     it('should have 5 read-only prompts', async () => {

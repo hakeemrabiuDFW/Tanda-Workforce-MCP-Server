@@ -19,6 +19,9 @@ import { changeHistoryTool } from './changeHistory';
 import { createUserTool, CREATE_USER_TOOL } from './createUser';
 import { deactivateUserTool, DEACTIVATE_USER_TOOL } from './deactivateUser';
 import { approveTimesheetsTool, APPROVE_TIMESHEETS_TOOL } from './approveTimesheets';
+import { siteScheduleTool } from './siteSchedule';
+import { allocationBoardTool } from './allocationBoard';
+import { appToolMeta } from '../apps/ui';
 import { writesEnabled } from '../../config/writes';
 import { ALIAS_NAMES, resolveAlias, V3_ALIASES } from './aliases';
 
@@ -38,6 +41,8 @@ export const TOOLS: Tool[] = [
   exceptionsTool,
   exportPreviewTool,
   changeHistoryTool,
+  siteScheduleTool,
+  allocationBoardTool,
   createUserTool,
   deactivateUserTool,
   approveTimesheetsTool,
@@ -46,7 +51,14 @@ export const TOOLS: Tool[] = [
 const byName = new Map(TOOLS.map((t) => [t.name, t]));
 
 /** Public tool definitions (no run functions). */
-export const tandaTools: MCPTool[] = TOOLS.map(({ name, description, inputSchema }) => ({ name, description, inputSchema }));
+export const tandaTools: MCPTool[] = TOOLS.map(({ name, title, description, inputSchema, app }) => ({
+  name,
+  ...(title ? { title } : {}),
+  description,
+  inputSchema,
+  // MCP App tools only read from Tanda and point the host at their ui:// view
+  ...(app ? { annotations: { readOnlyHint: true, openWorldHint: false }, _meta: appToolMeta(app.view) } : {}),
+}));
 
 /** Deprecated names are callable but not listed, unless MCP_LIST_ALIASES=true. */
 export function getAvailableTools(): MCPTool[] {
@@ -90,7 +102,7 @@ export async function executeTool(
   client: TandaClient,
   toolName: string,
   rawArgs: Args
-): Promise<{ content: unknown; isError?: boolean }> {
+): Promise<{ content: unknown; isError?: boolean; summary?: string }> {
   let name = toolName;
   let args = rawArgs || {};
   let deprecation: string | undefined;
@@ -113,7 +125,12 @@ export async function executeTool(
     if (deprecation && content && typeof content === 'object' && !Array.isArray(content)) {
       content = { deprecation, ...(content as Record<string, unknown>) };
     }
-    return { content: finalizeContent(content, args) };
+    const safe = finalizeContent(content, args);
+    // An MCP App result that survived the size guard whole also gets a plain-text summary
+    if (tool.app && safe && typeof safe === 'object' && (safe as Record<string, unknown>).view === tool.app.view) {
+      return { content: safe, summary: tool.app.summary(safe as Record<string, unknown>) };
+    }
+    return { content: safe };
   } catch (error) {
     if (error instanceof ArgError) return { content: { error: error.message, tool: name }, isError: true };
     if (error instanceof TandaApiError) return { content: { ...error.toJSON(), tool: name }, isError: true };
