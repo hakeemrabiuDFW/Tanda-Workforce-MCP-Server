@@ -35,6 +35,10 @@ The server does not write to Tanda, with four exceptions: creating users (#84), 
 - `tanda_approve_timesheets` can only be applied by a person's own login, so Tanda records a person as the approver. The shared server identity may preview, which the staging release gate (#97) needs. That preview returns the same timesheet rows as `tanda_timesheets` (names, hours, cost) and no `confirm_token`, and the shared identity's apply is refused ([ADR 0001](adr/0001-write-tool-identity.md)). It never touches exported timesheets and needs `allow_past_period` for periods that ended more than 14 days ago. It changes at most 100 timesheets per call, and its token covers the exact shift and status changes.
 - All four log each change with the user id, the caller and `source_ref`. Writes are never retried after a timeout or 5xx, because the change may already have happened. Only a 401 is retried, after a token refresh.
 
+## MCP App views
+
+`conversation_to_site_schedule` and `staff_allocation_board` point hosts at two `ui://tanda-workforce/*.html` resources (MCP Apps). They add no HTTP route: the HTML is returned by `resources/read` on the authenticated MCP endpoint. The pages are static, carry no Tanda data, and load nothing from the network, so their CSP metadata declares no domains. Data reaches a page only from the host, as the tool result. Both tools are read-only (`GET /locations`, `/departments`, `/users`, `/schedules`), show staff as first name plus last initial, and their results pass the same privacy filter and 25 KB cap as every other tool.
+
 ## Tanda OAuth scopes (least privilege)
 
 Scopes come from `TANDA_SCOPES` (space or comma separated). The default is the least-privilege set:

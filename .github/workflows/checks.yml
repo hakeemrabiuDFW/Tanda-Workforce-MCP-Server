@@ -24,6 +24,8 @@ jobs:
           node-version: 20
           cache: npm
       - run: npm ci
+      # The MCP App view tests render the pages in headless Chromium
+      - run: npx playwright install --with-deps chromium
       - run: npm run lint
       - run: npx tsc --noEmit
       - run: npm test -- --ci
