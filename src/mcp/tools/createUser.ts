@@ -60,8 +60,13 @@ export function buildCreatePayload(args: Args): Rec {
 
 const normName = (v: unknown) => String(v ?? '').trim().replace(/\s+/g, ' ').toLowerCase();
 
-/** An existing user (active or inactive) with the same email, or the same name and start date. */
-async function findExisting(client: TandaClient, payload: Rec): Promise<Rec | null> {
+/**
+ * An existing user (active or inactive) with the same email, or the same name and start date.
+ * Tanda hides the email of inactive users (it comes back null) but still refuses to create a
+ * second user with it, so an inactive user with a hidden email and the same name also counts,
+ * unless the caller says this is a different person (`not_a_rehire`).
+ */
+async function findExisting(client: TandaClient, payload: Rec, notARehire: boolean): Promise<Rec | null> {
   const [active, inactive] = await Promise.all([client.getUsers(), client.getInactiveUsers()]);
   const all = [...active, ...inactive];
   const email = payload.email as string;
@@ -70,6 +75,17 @@ async function findExisting(client: TandaClient, payload: Rec): Promise<Rec | nu
   if (payload.employment_start_date) {
     const byName = all.find((u) => normName(u.name) === normName(payload.name) && u.employment_start_date === payload.employment_start_date);
     if (byName) return { existing_user_id: byName.id, matched_on: 'name_and_start_date', active: byName.active !== false };
+  }
+  if (!notARehire) {
+    const hidden = inactive.find((u) => normName(u.name) === normName(payload.name) && !(typeof u.email === 'string' && u.email.trim()));
+    if (hidden) {
+      return {
+        existing_user_id: hidden.id,
+        matched_on: 'name_inactive',
+        active: false,
+        note: 'An inactive user has this name, and Tanda hides inactive users\' emails (it refuses to reuse one). If this is the same person, rehire them in Tanda; if it is someone else, call again with not_a_rehire: true.',
+      };
+    }
   }
   return null;
 }
@@ -99,7 +115,7 @@ export const createUserTool: Tool = {
   name: CREATE_USER_TOOL,
   description:
     'Creates a Tanda employee in two steps: a call without confirm_token returns the exact payload and a confirm_token, and the same call plus confirm_token creates the user. ' +
-    'Refuses duplicates (same email, or same name and start date) by returning the existing user id.',
+    'Refuses duplicates (same email, same name and start date, or an inactive same-name user) by returning the existing user id.',
   inputSchema: {
     type: 'object',
     properties: {
@@ -112,6 +128,7 @@ export const createUserTool: Tool = {
       hourly_rate: { type: 'number', description: 'Hourly pay rate, above 0 and at most 100 (needs the cost scope). Without it timesheets cost $0' },
       user_levels: { type: 'array', items: { type: 'string' }, description: 'Default ["employee"]; only "employee" is allowed' },
       send_invite: { type: 'boolean', description: 'Email the Tanda invite after creating (default false)' },
+      not_a_rehire: { type: 'boolean', description: 'Set when an inactive user with the same name is a different person, so the name match does not block the hire (default false)' },
       source_ref: { type: 'string', description: 'Audit reference, e.g. the Monday item id. Required when called with the shared server token (ADR 0001)' },
       dry_run: { type: 'boolean', description: 'Preview only. Default true without confirm_token, false with it' },
       confirm_token: { type: 'string', description: 'Token from the preview; creates the user' },
@@ -135,7 +152,7 @@ export const createUserTool: Tool = {
     const warnings: Warning[] = [];
 
     await checkDepartments(client, payload.department_ids as number[] | undefined, warnings);
-    const existing = await findExisting(client, payload);
+    const existing = await findExisting(client, payload, bool(args.not_a_rehire));
     if (existing) {
       if (token) logger.info(`${CREATE_USER_TOOL} refused duplicate`, { existing_user_id: existing.existing_user_id, matched_on: existing.matched_on, caller: client.cacheScope, source_ref: sourceRef });
       return { status: 'exists', created: false, ...existing, ...withWarnings(warnings) };

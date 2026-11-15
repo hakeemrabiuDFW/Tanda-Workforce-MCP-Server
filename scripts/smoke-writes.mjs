@@ -8,7 +8,10 @@
  * Optional: SMOKE_EMAIL (default zz.mcp.smoke@example.com), SMOKE_FROM / SMOKE_TO (old pay
  * period for the approval preview, default 2026-08-10..2026-08-23), SMOKE_REF (source_ref).
  *
- * The test hire is always left inactive, so it never counts towards the billed headcount.
+ * The test hire is always left inactive, so it never counts towards the billed headcount. On
+ * later runs it already exists (inactive), so the script reuses it instead of creating another:
+ * it checks the duplicate is found, that updates to an inactive user are refused, and that it
+ * stays inactive.
  * Exits non-zero on the first failed step. It is the staging gate before production.
  */
 const url = process.env.MCP_URL || 'http://localhost:3000/mcp';
@@ -47,7 +50,9 @@ function check(label, ok, detail = '') {
   }
 }
 const statusOf = (r) => r.body.status ?? r.body.summary?.status;
-const errorOf = (r) => String(r.body.error ?? '').slice(0, 120);
+const errorOf = (r) => String(r.body.error ?? r.body.summary?.error ?? '').slice(0, 160);
+// On an error show Tanda's reason, not the numeric HTTP status that shares the "status" key
+const detailOf = (r) => (r.isError ? errorOf(r) || 'error' : String(statusOf(r) ?? ''));
 const noPii = (r) => !/"(date_of_birth|passcode)"/.test(r.text);
 
 const listed = await fetch(url, {
@@ -67,37 +72,50 @@ check('create without source_ref is refused under the shared token', noRef.isErr
 
 const hire = { name, email, source_ref: sourceRef };
 const preview = await call('tanda_create_user', hire);
-check('create preview', !preview.isError && ['preview', 'exists'].includes(statusOf(preview)) && noPii(preview), statusOf(preview) || errorOf(preview));
+check('create preview', !preview.isError && ['preview', 'exists'].includes(statusOf(preview)) && noPii(preview), detailOf(preview));
 
 let userId;
+let active;
 if (statusOf(preview) === 'preview') {
   const created = await call('tanda_create_user', { ...hire, confirm_token: preview.body.confirm_token });
-  check('create confirm', !created.isError && created.body.status === 'created' && typeof created.body.user_id === 'number' && noPii(created), created.body.status || errorOf(created));
+  check('create confirm', !created.isError && created.body.status === 'created' && typeof created.body.user_id === 'number' && noPii(created), detailOf(created));
   userId = created.body.user_id;
+  active = true;
   const again = await call('tanda_create_user', hire);
-  check('duplicate create returns the same user', again.body.status === 'exists' && again.body.existing_user_id === userId, again.body.status || errorOf(again));
-
-  const upd = { user_id: userId, employment_start_date: period.from, source_ref: sourceRef };
-  const updPreview = await call('tanda_update_user', upd);
-  const updToken = updPreview.body.summary?.confirm_token;
-  check('update preview', !updPreview.isError && statusOf(updPreview) === 'preview' && Boolean(updToken), statusOf(updPreview) || errorOf(updPreview));
-  const updApply = await call('tanda_update_user', { ...upd, confirm_token: updToken });
-  check('update confirm', !updApply.isError && statusOf(updApply) === 'applied' && updApply.body.summary?.succeeded === 1, statusOf(updApply) || errorOf(updApply));
+  check('duplicate create returns the same user', again.body.status === 'exists' && again.body.existing_user_id === userId, detailOf(again));
 } else {
+  // An earlier run's test hire: reuse it, never create a second one
   userId = preview.body.existing_user_id;
-  check('existing test hire found by email (earlier run)', typeof userId === 'number', `matched_on=${preview.body.matched_on}`);
+  active = preview.body.active !== false;
+  check('existing test hire found (earlier run), nothing created', typeof userId === 'number', `matched_on=${preview.body.matched_on}, active=${active}`);
+}
+
+const upd = { user_id: userId, employment_start_date: period.from, source_ref: sourceRef };
+const updPreview = await call('tanda_update_user', upd);
+if (active && statusOf(updPreview) === 'unchanged') {
+  // An active hire left by an interrupted run that already has this start date
+  check('update preview (already up to date)', !updPreview.isError, detailOf(updPreview));
+} else if (active) {
+  const updToken = updPreview.body.summary?.confirm_token;
+  check('update preview', !updPreview.isError && statusOf(updPreview) === 'preview' && Boolean(updToken), detailOf(updPreview));
+  const updApply = await call('tanda_update_user', { ...upd, confirm_token: updToken });
+  check('update confirm', !updApply.isError && statusOf(updApply) === 'applied' && updApply.body.summary?.succeeded === 1, detailOf(updApply));
+} else {
+  const sum = updPreview.body.summary || {};
+  check('update of an inactive user is refused (rehire first), nothing changed', !updPreview.isError && sum.status === 'nothing_to_change' && sum.refused === 1 && !sum.confirm_token && /inactive/.test(updPreview.text),
+    detailOf(updPreview));
 }
 
 const deact = { user_id: userId, source_ref: sourceRef };
 const dPreview = await call('tanda_deactivate_user', deact);
 if (dPreview.body.status === 'preview') {
   const dApply = await call('tanda_deactivate_user', { ...deact, confirm_token: dPreview.body.confirm_token });
-  check('deactivate confirm', !dApply.isError && dApply.body.status === 'deactivated', dApply.body.status || errorOf(dApply));
+  check('deactivate confirm', !dApply.isError && dApply.body.status === 'deactivated', detailOf(dApply));
 } else {
-  check('deactivate preview', dPreview.body.status === 'already_inactive', dPreview.body.status || errorOf(dPreview));
+  check('deactivate preview', dPreview.body.status === 'already_inactive', detailOf(dPreview));
 }
 const dAgain = await call('tanda_deactivate_user', deact);
-check('test hire is inactive (not billed)', dAgain.body.status === 'already_inactive', dAgain.body.status || errorOf(dAgain));
+check('test hire is inactive (not billed)', dAgain.body.status === 'already_inactive', detailOf(dAgain));
 
 const approve = { ...period, allow_past_period: true, source_ref: sourceRef };
 const aPreview = await call('tanda_approve_timesheets', approve);
