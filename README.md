@@ -72,7 +72,7 @@ Sets `hourly_rate`, `award_template_id`, `employment_start_date`, `department_id
 
 ### Approving timesheets (`tanda_approve_timesheets`, off by default)
 
-Approves Tanda timesheets for a pay period, or returns them to pending (`action: "unapprove"`). It needs a person's own Tanda login: calls made with the shared server token (`MCP_SHARED_SECRET` + `TANDA_ACCESS_TOKEN`) are refused, so Tanda's history always shows who approved.
+Approves Tanda timesheets for a pay period, or returns them to pending (`action: "unapprove"`). Applying needs a person's own Tanda login, so Tanda's history always shows who approved. The shared server token (`MCP_SHARED_SECRET` + `TANDA_ACCESS_TOKEN`) can only preview: it gets no `confirm_token`, and an apply is refused. The staging release gate uses that preview ([ADR 0001](docs/adr/0001-write-tool-identity.md)).
 
 1. Call with `from`/`to` (the pay period) and optionally `timesheet_ids`, `user_ids` or `location_ids`. Nothing changes. Each timesheet row shows `will_change` or a `skip_reason`, any data-quality `flags`, and the `shift_changes` that would be made. A `confirm_token` comes back with the preview.
 2. Repeat the call with `confirm_token`. Each timesheet's shift changes are applied first, then its status. A failure on one timesheet is reported in its row (`outcome: "failed"`), and the others carry on.
@@ -148,9 +148,12 @@ npx playwright install chromium   # once: the MCP App view tests render the page
 npm test          # unit + integration tests (Tanda stubbed; includes an 84-site / 70-user size check)
 npm run build
 MCP_URL=https://your-domain.com/mcp MCP_TOKEN=<secret> npm run smoke [from] [to]
+MCP_URL=https://your-domain.com/mcp MCP_TOKEN=<secret> npm run smoke:writes
 ```
 
 `npm run smoke` calls all 12 read tools and the two staffing apps against a running server and prints only the shape and size of each response (no row values). It exits non-zero if a tool errors, exceeds 25 KB, or returns `date_of_birth`/`passcode`.
+
+`npm run smoke:writes` exercises every write tool with the shared secret. It creates the test hire "ZZ MCP Smoke" (`SMOKE_EMAIL`, default `zz.mcp.smoke@example.com`, no invite), checks that a duplicate is caught, updates and deactivates the hire, previews approval on an old pay period (`SMOKE_FROM`/`SMOKE_TO`), and checks that the shared token can't apply an approval. It prints step results only. The test hire always ends inactive, so it never counts towards the billed headcount. On later runs the hire already exists, so the script checks the duplicate detection and that the hire is still inactive.
 
 ## Releasing
 
@@ -158,8 +161,9 @@ Changes reach production through `staging` first:
 
 1. Open a pull request into `staging`. CI runs typecheck, tests and build.
 2. Merge it. **Build and deploy** (`.github/workflows/deploy.yml`) tests again, pushes the image as `:staging` and `:<commit>`, redeploys the `tanda-mcp-stage` Railway service, and waits until its `/health` reports the new commit.
-3. Check staging (`https://tanda-mcp-stage-production.up.railway.app`), for example with `npm run smoke`.
-4. Merge the release pull request from `staging` into `main`. The **Release PR** workflow (`.github/workflows/release-pr.yml`) opens it as soon as `staging` has changes `main` lacks, lists the change PRs it carries, and keeps it updated; each release gets its own PR. Merging it ships `:production` to the production service.
+3. Check staging (`https://tanda-mcp-stage-production.up.railway.app`) with `npm run smoke` and `npm run smoke:writes`.
+4. **Hard requirement:** the **Staging gate** check (`.github/workflows/staging-gate.yml`) must be green on the release pull request. It waits until staging serves the release commit, checks that auth is enforced, then runs both smoke tests against staging. It needs the `STAGING_MCP_TOKEN` repository secret (the staging `MCP_SHARED_SECRET`). Mark `staging-gate` as a required check for `main` in branch protection.
+5. Merge the release pull request from `staging` into `main`. The **Release PR** workflow (`.github/workflows/release-pr.yml`) opens it as soon as `staging` has changes `main` lacks, lists the change PRs it carries, and keeps it updated; each release gets its own PR. Merging it ships `:production` to the production service.
 
 The deploy step needs a Railway project token as the `RAILWAY_TOKEN` repository secret; without it the image is pushed but not deployed. To require approval for production, add reviewers to the `production` environment in the repository's settings. To roll back, redeploy an earlier deployment in Railway, or point the service at an earlier `:<commit>` image.
 

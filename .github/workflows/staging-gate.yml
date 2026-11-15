@@ -1,0 +1,60 @@
+name: Staging gate
+
+# Hard requirement before production (#97): the release PR (staging -> main) can't go green
+# until staging serves the PR's commit and the read and write smoke tests pass against it.
+# Mark the "staging-gate" check as required for main in branch protection.
+#
+# Needs the STAGING_MCP_TOKEN repo secret (the staging service's MCP_SHARED_SECRET).
+# The write smoke leaves its test hire inactive, so it never adds to the billed headcount.
+
+on:
+  pull_request:
+    branches: [main]
+    types: [opened, synchronize, reopened, ready_for_review]
+  workflow_dispatch:
+
+concurrency:
+  group: staging-gate
+  cancel-in-progress: false
+
+permissions:
+  contents: read
+
+jobs:
+  staging-gate:
+    # Only the release PR from this repo's staging branch; never fork PRs (no secrets for them)
+    if: >-
+      github.event_name == 'workflow_dispatch' ||
+      (github.event.pull_request.head.ref == 'staging' && github.event.pull_request.head.repo.full_name == github.repository)
+    runs-on: ubuntu-latest
+    env:
+      URL: https://tanda-mcp-stage-production.up.railway.app
+      MCP_TOKEN: ${{ secrets.STAGING_MCP_TOKEN }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+      - name: Require the staging secret
+        run: |
+          [ -n "$MCP_TOKEN" ] || { echo "::error::Set the STAGING_MCP_TOKEN repo secret (staging MCP_SHARED_SECRET). Production is blocked until the staging write smoke can run."; exit 1; }
+      - name: Wait until staging serves this commit
+        run: |
+          want=$(git rev-parse --short=7 HEAD)
+          for i in $(seq 1 60); do
+            rev=$(curl -fsS "$URL/health" | python3 -c 'import sys,json; print(json.load(sys.stdin).get("revision") or "")' || true)
+            [ "$rev" = "$want" ] && { echo "staging serves $want"; exit 0; }
+            sleep 10
+          done
+          echo "::error::staging serves '${rev:-unknown}', expected $want. Redeploy tanda-mcp-stage (the deploy workflow does it when RAILWAY_TOKEN is set), then re-run this check."
+          exit 1
+      - name: Auth is enforced
+        run: |
+          code=$(curl -s -o /dev/null -w '%{http_code}' -X POST -H 'content-type: application/json' -d '{"jsonrpc":"2.0","id":1,"method":"tools/list"}' "$URL/mcp")
+          [ "$code" = "401" ] || { echo "::error::Unauthenticated /mcp returned $code, expected 401"; exit 1; }
+      - name: Read smoke (every read tool)
+        run: MCP_URL="$URL/mcp" node scripts/smoke.mjs
+      - name: Write smoke (create, update, deactivate, approval preview)
+        run: MCP_URL="$URL/mcp" SMOKE_REF="staging-gate ${GITHUB_SHA::7}" node scripts/smoke-writes.mjs

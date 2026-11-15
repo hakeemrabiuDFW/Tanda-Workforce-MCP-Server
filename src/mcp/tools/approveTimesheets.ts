@@ -15,6 +15,7 @@ export const APPROVE_TIMESHEETS_TOOL = 'tanda_approve_timesheets';
 
 /** Most timesheets changed by one confirm. */
 export const MAX_BATCH = 100;
+const SHARED_REFUSAL = `${APPROVE_TIMESHEETS_TOOL} needs a person's own Tanda login (OAuth) to apply, so Tanda records who approved. The shared server token can only preview.`;
 /** Periods that ended longer ago than this need allow_past_period (they are likely paid already). */
 const PAST_PERIOD_DAYS = 14;
 const MAX_SHIFT_HOURS = 12;
@@ -211,10 +212,6 @@ export const approveTimesheetsTool: Tool = {
     if (!writesEnabled()) {
       throw new ArgError(`${APPROVE_TIMESHEETS_TOOL} is turned off on this server (TANDA_WRITES_ENABLED is not true). Nothing was changed.`);
     }
-    // ADR 0001: approving is a judgment, so Tanda must record a person
-    if (client.isSharedIdentity) {
-      throw new ArgError(`${APPROVE_TIMESHEETS_TOOL} needs a person's own Tanda login (OAuth), so Tanda records who approved. The shared server token can't approve.`);
-    }
     const action = oneOf(args.action, ['approve', 'unapprove'] as const, 'approve', 'action');
     const sourceRef = text(args.source_ref, 'source_ref', 100);
     const token = typeof args.confirm_token === 'string' && args.confirm_token.trim() ? args.confirm_token.trim() : undefined;
@@ -238,6 +235,14 @@ export const approveTimesheetsTool: Tool = {
 
     if (dryRun || !token) {
       if (!changing.length) return guardResponse({ status: 'nothing_to_do', ...summary }, plans, { offset: args.offset, pageSize: args.limit });
+      // ADR 0001: the shared identity may preview (a read) but never gets a token to apply
+      if (client.isSharedIdentity) {
+        return guardResponse({ status: 'preview', changed: false, ...summary }, plans, {
+          offset: args.offset,
+          pageSize: args.limit,
+          extra: { next_step: `Preview only: ${SHARED_REFUSAL}` },
+        });
+      }
       return guardResponse(
         { status: 'preview', changed: false, ...summary },
         plans,
@@ -253,6 +258,8 @@ export const approveTimesheetsTool: Tool = {
       );
     }
 
+    // ADR 0001: approving is a judgment, so Tanda must record a person
+    if (client.isSharedIdentity) throw new ArgError(SHARED_REFUSAL);
     checkConfirmToken(token, APPROVE_TIMESHEETS_TOOL, client.cacheScope, tokenRequest(action, plans, sourceRef));
     let callerId: unknown = null;
     try {
