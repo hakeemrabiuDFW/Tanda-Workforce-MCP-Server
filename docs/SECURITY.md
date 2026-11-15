@@ -21,12 +21,16 @@ Two credentials are accepted as `Authorization: Bearer <token>`:
 
 Shared-secret auth is off unless both variables are set. The comparison is constant-time.
 
-## Read-only
+## Read-only, with three exceptions
 
-The server never writes to Tanda:
+The server does not write to Tanda, with three exceptions: creating users (#84), deactivating them (#88) and approving timesheets (#86).
 
-- The Tanda HTTP client rejects any verb other than `GET`/`HEAD` before the request leaves the process.
-- No tool exposes a write action.
+- The Tanda HTTP client rejects any verb other than `GET`/`HEAD` before the request leaves the process. The only exceptions are `POST /users`, `POST /users/{id}/invite`, `DELETE /users/{id}`, `PUT /timesheets/{id}` and `PUT /shifts/{id}`, listed in `src/config/writes.ts`. Tanda treats the delete as a deactivation, which rehire reverses. The client only sends `status` (approved or pending, never exported) to timesheets, and only `finish` and `metadata` to shifts. All of these are refused unless `TANDA_WRITES_ENABLED=true`, which is off by default.
+- The only tools that write are `tanda_create_user`, `tanda_deactivate_user` and `tanda_approve_timesheets`. None is listed while writes are off. All three need a preview followed by a second call with an HMAC `confirm_token` (`src/mcp/confirm.ts`). The token is signed with `JWT_SECRET`, bound to the tool, the exact arguments and the caller's Tanda token, and valid for 15 minutes.
+- `tanda_create_user` refuses duplicates and sends only a fixed whitelist of fields (no wage, DOB, passcode, tax, bank or role fields). It can only set the `employee` level.
+- `tanda_deactivate_user` refuses users with any level other than `employee` and refuses the caller's own account. It fails closed if the caller can't be identified.
+- `tanda_approve_timesheets` refuses the shared server identity, so Tanda records a person as the approver. It never touches exported timesheets and needs `allow_past_period` for periods that ended more than 14 days ago. It changes at most 100 timesheets per call, and its token covers the exact shift and status changes.
+- All three log each change with the user id, the caller and `source_ref`. Writes are never retried after a timeout or 5xx, because the change may already have happened. Only a 401 is retried, after a token refresh.
 
 ## Tanda OAuth scopes (least privilege)
 

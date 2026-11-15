@@ -28,6 +28,12 @@ export async function soft<T>(warnings: Warning[], check: string, fallback: T, f
   }
 }
 
+/** A short client-facing reason for a failed write: HTTP status and our hint, never Tanda's response text. */
+export function writeFailureReason(error: unknown, fallback: string): string {
+  if (!(error instanceof TandaApiError)) return fallback;
+  return `Tanda returned HTTP ${error.statusCode}${error.hint ? `. ${error.hint}` : ''}`;
+}
+
 /** `{ warnings }` when there are any, else `{}`: spread into a response. */
 export function withWarnings(warnings: Warning[]): { warnings?: Warning[] } {
   return warnings.length ? { warnings } : {};

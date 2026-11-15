@@ -64,6 +64,15 @@ export function dateRange(args: Args, opts: { defaultSpan?: number; defaultBackD
   return { from, to };
 }
 
+/** Optional trimmed string (inner whitespace collapsed), at most `max` characters. */
+export function text(value: unknown, name: string, max: number): string | undefined {
+  if (value === undefined || value === null || value === '') return undefined;
+  if (typeof value !== 'string') throw new ArgError(`${name} must be a string.`);
+  const trimmed = value.trim().replace(/\s+/g, ' ');
+  if (trimmed.length > max) throw new ArgError(`${name} must be at most ${max} characters.`);
+  return trimmed || undefined;
+}
+
 export function requireId(value: unknown, name: string): number {
   const n = num(value);
   if (!n || n <= 0) throw new ArgError(`${name} is required (a positive number).`);

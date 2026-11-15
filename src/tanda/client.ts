@@ -5,6 +5,7 @@ import { logger } from '../utils/logger';
 import { TandaTokenResponse, TandaUser, TandaDailyStats } from './types';
 import { tandaRateLimiter } from './rateLimiter';
 import { ETagCache } from './etagCache';
+import { isAllowedWrite } from '../config/writes';
 import { chunkDateRange, toUnixSeconds, addDays, DEFAULT_TIMEZONE } from '../utils/time';
 import { dedupeById, itemDate, itemHours } from './normalize';
 
@@ -36,6 +37,8 @@ export interface TandaClientOptions {
    * instead of this client spending its own copy of the refresh token.
    */
   refresh?: (failedAccessToken: string) => Promise<string>;
+  /** True for the server's own TANDA_ACCESS_TOKEN identity (shared-secret auth), not a person's OAuth login. */
+  sharedIdentity?: boolean;
 }
 
 export interface GetOptions {
@@ -90,16 +93,21 @@ export class TandaClient {
     });
 
     this.client.interceptors.request.use(async (requestConfig) => {
-      // This server is read-only: never send a mutating request to Tanda.
+      // This server is read-only apart from the allowlist in config/writes.ts (user creation).
       const method = (requestConfig.method || 'get').toLowerCase();
-      if (method !== 'get' && method !== 'head') {
+      if (method !== 'get' && method !== 'head' && !isAllowedWrite(method, requestConfig.url)) {
         throw new TandaApiError(`Read-only server: ${method.toUpperCase()} requests to Tanda are disabled`, 403);
       }
       if (!this.options.disableRateLimit) await tandaRateLimiter.acquire();
       requestConfig.headers.Authorization = `Bearer ${this.accessToken}`;
-      logger.debug(`Tanda API Request: GET ${requestConfig.url}`);
+      logger.debug(`Tanda API Request: ${method.toUpperCase()} ${requestConfig.url}`);
       return requestConfig;
     });
+  }
+
+  /** Calls made with the server's shared TANDA_ACCESS_TOKEN rather than a person's own login. */
+  get isSharedIdentity(): boolean {
+    return this.options.sharedIdentity === true;
   }
 
   getTokenInfo(): { accessToken: string; expiresAt?: number } {
@@ -197,6 +205,59 @@ export class TandaClient {
         throw this.toApiError(error, path);
       }
     }
+  }
+
+  /**
+   * Send an allowlisted write (see config/writes.ts). Only a 401 is retried (after a token refresh):
+   * a timeout or 5xx may have created the record, so those are never retried blindly.
+   */
+  private async write<T = unknown>(method: 'post' | 'put' | 'delete', path: string, body?: Rec): Promise<T> {
+    let refreshed = false;
+    for (;;) {
+      try {
+        return (await this.client.request<T>({ method, url: path, data: body })).data;
+      } catch (error) {
+        const status = (error as AxiosError).response?.status;
+        if (status === 401 && !refreshed && (this.refreshToken || this.options.refresh)) {
+          refreshed = true;
+          try {
+            await this.refreshAccessToken();
+            continue;
+          } catch {
+            /* fall through to error mapping */
+          }
+        }
+        throw this.toApiError(error, path);
+      }
+    }
+  }
+
+  /** POST /users. Needs TANDA_WRITES_ENABLED=true and the "user" scope. */
+  async createUser(body: Rec): Promise<Rec> {
+    return this.write<Rec>('post', '/users', body);
+  }
+
+  /** POST /users/{id}/invite: emails the user an invite to Tanda. */
+  async inviteUser(userId: number): Promise<void> {
+    await this.write('post', `/users/${userId}/invite`, {});
+  }
+
+  /** DELETE /users/{id}: Tanda marks the user inactive (reversible with rehire) and returns them. */
+  async deactivateUser(userId: number): Promise<Rec> {
+    return this.write<Rec>('delete', `/users/${userId}`);
+  }
+
+  /** PUT /timesheets/{id}: approve, or return to pending. Never "exported" (that locks costs). */
+  async setTimesheetStatus(timesheetId: number, status: 'approved' | 'pending'): Promise<Rec> {
+    return this.write<Rec>('put', `/timesheets/${timesheetId}`, { status });
+  }
+
+  /** PUT /shifts/{id}, limited to filling a missing finish and setting the exception note. */
+  async updateShift(shiftId: number, change: { finish?: number; metadata?: string }): Promise<Rec> {
+    const body: Rec = {};
+    if (change.finish !== undefined) body.finish = change.finish;
+    if (change.metadata !== undefined) body.metadata = change.metadata;
+    return this.write<Rec>('put', `/shifts/${shiftId}`, body);
   }
 
   private async getList<T = Rec>(path: string, params: Record<string, string | undefined> = {}, opts: GetOptions = {}): Promise<T[]> {
