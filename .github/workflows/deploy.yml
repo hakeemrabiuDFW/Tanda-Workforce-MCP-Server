@@ -4,8 +4,8 @@ name: Build and deploy
 # main branch    -> image :production -> Railway service serving production
 #
 # Every image is also tagged with its commit, so any release can be redeployed exactly.
-# Railway's services track the :staging / :production tags; this workflow builds and
-# tests the image, pushes it, tells Railway to pull it, then waits until /health reports
+# Railway's services track the :staging / :production tags; this workflow runs checks.yml,
+# builds the image, pushes it, tells Railway to pull it, then waits until /health reports
 # the new commit. Railway's own builders are not used.
 
 on:
@@ -21,7 +21,15 @@ env:
   IMAGE: ghcr.io/hakeemrabiudfw/tanda-workforce-mcp-server
 
 jobs:
+  # The same lint, typecheck, tests and build that every PR runs, so the two can't drift
+  checks:
+    if: github.ref_name == 'staging' || github.ref_name == 'main'
+    uses: ./.github/workflows/checks.yml
+    permissions:
+      contents: read
+
   build:
+    needs: checks
     if: github.ref_name == 'staging' || github.ref_name == 'main'
     runs-on: ubuntu-latest
     permissions:
@@ -36,15 +44,6 @@ jobs:
         run: |
           if [ "$GITHUB_REF_NAME" = "main" ]; then echo "channel=production" >> "$GITHUB_OUTPUT"; else echo "channel=staging" >> "$GITHUB_OUTPUT"; fi
           echo "sha=$(git rev-parse --short=7 HEAD)" >> "$GITHUB_OUTPUT"
-      - uses: actions/setup-node@v4
-        with:
-          node-version: 20
-          cache: npm
-      - run: npm ci
-      # The MCP App view tests render the pages in headless Chromium (same step as checks.yml)
-      - run: npx playwright install --with-deps chromium
-      - run: npx tsc --noEmit
-      - run: npm test -- --ci
       - uses: docker/login-action@v3
         with:
           registry: ghcr.io
