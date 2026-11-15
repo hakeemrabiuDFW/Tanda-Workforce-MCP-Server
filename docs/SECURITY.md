@@ -23,6 +23,8 @@ Shared-secret auth is off unless both variables are set. The comparison is const
 
 ## Read-only, with three exceptions
 
+Which identity each write runs as is decided in [ADR 0001](adr/0001-write-tool-identity.md).
+
 The server does not write to Tanda, with three exceptions: creating users (#84), deactivating them (#88) and approving timesheets (#86).
 
 - The Tanda HTTP client rejects any verb other than `GET`/`HEAD` before the request leaves the process. The only exceptions are `POST /users`, `POST /users/{id}/invite`, `DELETE /users/{id}`, `PUT /timesheets/{id}` and `PUT /shifts/{id}`, listed in `src/config/writes.ts`. Tanda treats the delete as a deactivation, which rehire reverses. The client only sends `status` (approved or pending, never exported) to timesheets, and only `finish` and `metadata` to shifts. All of these are refused unless `TANDA_WRITES_ENABLED=true`, which is off by default.
