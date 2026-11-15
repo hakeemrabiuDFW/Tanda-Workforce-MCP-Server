@@ -61,6 +61,7 @@ branch = one PR. Production only ever receives what passed on staging.
   merged commit as `revision` before testing.
 - Smoke test every tool against staging:
   `MCP_URL=https://tanda-mcp-stage-production.up.railway.app/mcp MCP_TOKEN=<staging MCP_SHARED_SECRET> npm run smoke`
+  and the write tools with `npm run smoke:writes` (same variables).
   Read the secret from the staging service's variables with the Railway
   connector. Never print it, log it, or commit it.
 - Also run the issue's own acceptance check against staging, and record both
@@ -72,6 +73,12 @@ branch = one PR. Production only ever receives what passed on staging.
 
 - Batch: once every issue picked up in this round passes on staging, open one
   PR from `staging` into `main` listing the issues, with the same template.
+- **Hard requirement:** never merge the release PR unless its `staging-gate`
+  check is green. That check runs `npm run smoke` and `npm run smoke:writes`
+  (create, duplicate, update, deactivate, approval preview) against staging at
+  the release commit. If it's red or missing (for example the
+  `STAGING_MCP_TOKEN` secret isn't set, or staging serves another commit),
+  fix that or ask Hakeem. No exceptions, even when Hakeem asks for production.
 - After it merges, `deploy.yml` builds `:production` and deploys it when
   `RAILWAY_TOKEN` is set; otherwise redeploy the production service (named
   `tanda-mcp-v4-staging` in Railway, despite the name) with the connector. Confirm
