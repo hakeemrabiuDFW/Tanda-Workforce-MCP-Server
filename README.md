@@ -1,11 +1,11 @@
 # Tanda Workforce MCP Server v4.0.1
 
-A read-only MCP (Model Context Protocol) server for the Tanda / Workforce.com API, with three guarded exceptions: creating employees, deactivating them and approving timesheets. It exposes 12 consolidated read tools, plus three write tools (`tanda_create_user`, `tanda_deactivate_user`, `tanda_approve_timesheets`) when `TANDA_WRITES_ENABLED=true`. Every tool is privacy-filtered and returns at most 25 KB, so assistants like Claude can answer workforce questions without overflowing their context.
+A read-only MCP (Model Context Protocol) server for the Tanda / Workforce.com API, with four guarded exceptions: creating employees, deactivating them, updating their pay rate and similar fields, and approving timesheets. It exposes 12 consolidated read tools, plus four write tools (`tanda_create_user`, `tanda_deactivate_user`, `tanda_update_user`, `tanda_approve_timesheets`) when `TANDA_WRITES_ENABLED=true`. Every tool is privacy-filtered and returns at most 25 KB, so assistants like Claude can answer workforce questions without overflowing their context.
 
 ## Security
 
 - **Auth on every MCP route.** `POST /mcp`, `GET /mcp` and `POST /` require an OAuth JWT or `Authorization: Bearer <MCP_SHARED_SECRET>`. Unauthenticated calls get `401`.
-- **Read-only, with three guarded exceptions.** The Tanda client refuses any non-GET request except `POST /users`, `POST /users/{id}/invite`, `DELETE /users/{id}`, `PUT /timesheets/{id}` and `PUT /shifts/{id}`, and refuses those too unless `TANDA_WRITES_ENABLED=true` (off by default).
+- **Read-only, with four guarded exceptions.** The Tanda client refuses any non-GET request except `POST /users`, `POST /users/{id}/invite`, `DELETE /users/{id}`, `PUT /users/{id}`, `PUT /timesheets/{id}` and `PUT /shifts/{id}`, and refuses those too unless `TANDA_WRITES_ENABLED=true` (off by default).
 - **Least-privilege scopes.** The server requests `me roster timesheet department user cost leave`. It never requests `financial` or `personal`. `unavailability` is off by default because Workforce.com's OAuth fails when it is requested; add it to `TANDA_SCOPES` only if your OAuth app supports it.
 - **Privacy by default.** User records are whitelisted, and `date_of_birth`, `phone`, `email`, `legal_*` and `hourly_rate` are returned only when the `fields` parameter names them. `passcode`, `tax_*`, `bank_*` and `super_*` are never returned.
 
@@ -39,11 +39,15 @@ Only listed and callable when `TANDA_WRITES_ENABLED=true`. It creates a plain em
 1. Call with `name`, `email` and optionally `phone`, `employment_start_date`, `department_ids`, `award_template_id` (default 42, or `TANDA_DEFAULT_AWARD_TEMPLATE_ID`), `send_invite` and `source_ref` (e.g. the Monday item id). Nothing is created. The response is `status: "preview"` with the exact `payload` and a `confirm_token` valid for 15 minutes. Add `fields: ["email","phone"]` to see those in the preview.
 2. Call again with the same arguments plus `confirm_token`. The response is `status: "created"` with `user_id`, the user as `tanda_people` returns it, and `invite` (`not_requested`, `sent` or `failed`; a failed invite is a warning, not an error).
 
-The token is bound to the arguments and to the Tanda identity that asked for the preview. Changed arguments, another identity or an expired token are refused. Both calls first check for duplicates among active and inactive users. A user with the same email, or with the same name and start date, returns `status: "exists"` with `existing_user_id` and creates nothing. Unknown `department_ids` are refused. Only the `employee` level can be set, and wage, date of birth, passcode, tax, bank and role fields are never sent. Each creation is logged with the new user id, the caller's Tanda user id and `source_ref`. Calls made with the shared server token (scheduled tasks) must pass `source_ref`; see [ADR 0001](docs/adr/0001-write-tool-identity.md).
+The token is bound to the arguments and to the Tanda identity that asked for the preview. Changed arguments, another identity or an expired token are refused. Both calls first check for duplicates among active and inactive users. A user with the same email, or with the same name and start date, returns `status: "exists"` with `existing_user_id` and creates nothing. Unknown `department_ids` are refused. Only the `employee` level can be set, and date of birth, passcode, tax, bank and role fields are never sent. `hourly_rate` (above 0, at most 100; needs the `cost` scope) is optional, but without it the user's timesheets cost $0, so the preview warns when it's missing. The preview only says `pay_rate_set: true`; the value is never echoed. Each creation is logged with the new user id, the caller's Tanda user id and `source_ref`. Calls made with the shared server token (scheduled tasks) must pass `source_ref`; see [ADR 0001](docs/adr/0001-write-tool-identity.md).
 
 ### Deactivating employees (`tanda_deactivate_user`, off by default)
 
 Tanda's `DELETE /users/{id}` does not erase anyone. It marks the user inactive, and Tanda's rehire reverses it. Use this tool to remove test hires and leavers from the active, billed headcount. It works in the same two steps as `tanda_create_user`: call with `user_id` (plus `source_ref`, which is required under the shared server token; see [ADR 0001](docs/adr/0001-write-tool-identity.md)) to preview the user and get a `confirm_token`, then repeat the call with the token. An inactive user returns `status: "already_inactive"`. The tool refuses anyone with a level other than `employee`, and it refuses the caller's own account; it fails closed if the caller can't be identified. Each deactivation is logged with the user id, the caller and `source_ref`.
+
+### Updating employees (`tanda_update_user`, off by default)
+
+Sets `hourly_rate`, `award_template_id`, `employment_start_date`, `department_ids` (replaces the user's teams) or `employee_id` through Tanda's `PUT /users/{id}`. No other field can be sent. Use it to backfill pay rates for staff created without one: `tanda_exceptions` lists them under `missing_pay_rate`. Pass one user (`user_id` plus fields) or up to 50 in `updates: [{user_id, hourly_rate, ...}]`. The first call returns a before/after diff per user and a `confirm_token`. Repeat the call with the token to apply it. Each user's outcome is reported as `updated`, `not_applied` (Tanda kept the old value), `failed`, `unchanged` or `refused`. Rates must be above 0 and at most 100, and a change of more than 25% against the current rate is flagged in the preview. The tool refuses managers, admins, inactive users and the caller, and fails closed if the caller can't be identified. Rates in the diff show as `hidden` unless the call passes `show_wages: true` or `fields: ["hourly_rate"]`, the same opt-in as `tanda_people`, and current rates are visible only with the `cost` scope. Each update is logged with the user id, the changed field names, the caller and `source_ref`, which is required under the shared server token ([ADR 0001](docs/adr/0001-write-tool-identity.md)).
 
 ### Approving timesheets (`tanda_approve_timesheets`, off by default)
 
@@ -95,7 +99,7 @@ npm run build && npm start
 | `TANDA_BOOKKEEPING_LOCATION_IDS` | no | Default `281737,301754,396358` |
 | `TANDA_RATE_LIMIT_PER_MIN` | no | Client-side limit, default 80 (Tanda allows 100/min shared across password tokens) |
 | `MCP_LIST_ALIASES` | no | `true` lists the deprecated names in `tools/list` |
-| `TANDA_WRITES_ENABLED` | no | `true` turns on the write tools (`tanda_create_user`, `tanda_deactivate_user`, `tanda_approve_timesheets`). Off by default |
+| `TANDA_WRITES_ENABLED` | no | `true` turns on the write tools (`tanda_create_user`, `tanda_deactivate_user`, `tanda_update_user`, `tanda_approve_timesheets`). Off by default |
 | `TANDA_DEFAULT_AWARD_TEMPLATE_ID` | no | Award template for new users when none is given. Default 42 |
 
 ## Connecting to Claude

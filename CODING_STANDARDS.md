@@ -14,8 +14,8 @@ Judgement calls for reviewers, human or Claude. Anything a tool can check
   without a matching change to `docs/SECURITY.md`.
 - **The server stays read-only towards Tanda.** No tool or client path sends a
   write verb to the Tanda API, except the allowlist in `src/config/writes.ts`
-  (#84, #88, #86). That allowlist is gated by `TANDA_WRITES_ENABLED` and used
-  only by `tanda_create_user`, `tanda_deactivate_user` and
+  (#84, #88, #86, #94). That allowlist is gated by `TANDA_WRITES_ENABLED` and used
+  only by `tanda_create_user`, `tanda_deactivate_user`, `tanda_update_user` and
   `tanda_approve_timesheets`. A new write tool follows
   `docs/adr/0001-write-tool-identity.md`: it either needs a personal identity
   or, under the shared identity, needs `source_ref`. Widening it needs a change to
