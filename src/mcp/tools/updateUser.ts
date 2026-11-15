@@ -250,7 +250,7 @@ export const updateUserTool: Tool = {
       } catch (error) {
         failed++;
         rows.push({ user_id: p.update.user_id, user_name: p.user?.name ?? null, outcome: 'failed', reason: writeFailureReason(error, 'update failed') });
-        logger.warn(`${UPDATE_USER_TOOL} failed`, { user_id: p.update.user_id, caller: client.cacheScope, source_ref: sourceRef });
+        logger.warn(`${UPDATE_USER_TOOL} failed`, { user_id: p.update.user_id, fields: p.diff.map((d) => d.field), caller: client.cacheScope, source_ref: sourceRef });
       }
     }
     return guardResponse(
