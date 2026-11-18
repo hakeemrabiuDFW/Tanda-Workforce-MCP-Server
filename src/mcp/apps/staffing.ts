@@ -20,6 +20,10 @@ const TRAINEE_MAX_MONTHS = 3;
 const TRAINER_DEPT_RE = /^(ambassadors?|training)$/i;
 /** user_levels that count as a supervisor alongside the Supervisor departments. */
 const MANAGER_LEVEL_RE = /manager|supervisor/i;
+/** The office site: people whose only site is this are not field staff. */
+const OFFICE_SITE_RE = /\badministrative office\b/i;
+/** Test accounts by name, e.g. "ZZ Probe" or "Test Cleaner". */
+const TEST_NAME_RE = /^\s*(zz|test)\s/i;
 /** Hours a week past which someone is not suggested for more work. */
 const FULL_WEEK_HOURS = 40;
 /** Most rows returned per list, so the result stays under the 25 KB cap. */
@@ -63,17 +67,29 @@ export interface Staffing {
   trainer_source: string;
   /** TRAINER_USER_IDS people left off the trainer list for having under a year of tenure. */
   trainers_too_new: string[];
+  /** People left out of every pool: office-only staff, and test users or anyone with no start date. */
+  left_out: { office: number; test_or_no_start_date: number };
   shifts_counted: number;
 }
 
-/** Trainer user ids from TRAINER_USER_IDS (comma separated); empty when unset. Read at call time. */
-export function configuredTrainerIds(): Set<number> {
+/** Comma-separated user ids from an env variable; empty when unset. Read at call time. */
+function envUserIds(name: string): Set<number> {
   return new Set(
-    (process.env.TRAINER_USER_IDS || '')
+    (process.env[name] || '')
       .split(',')
       .map((s) => Number(s.trim()))
       .filter((n) => Number.isFinite(n) && n > 0)
   );
+}
+
+/** Trainer user ids from TRAINER_USER_IDS (comma separated); empty when unset. Read at call time. */
+export function configuredTrainerIds(): Set<number> {
+  return envUserIds('TRAINER_USER_IDS');
+}
+
+/** Office-only people who may still be suggested (e.g. operations staff who do site checks). */
+export function officeAllowedIds(): Set<number> {
+  return envUserIds('STAFFING_OFFICE_ALLOW_USER_IDS');
 }
 
 /** The workweek to plan in: the one containing `week_of`, else the one containing tomorrow. */
@@ -121,6 +137,8 @@ function sortPeople(list: Person[], sort: Sort): Person[] {
  * Supervisor = on a Supervisor department's staff list or a manager user level. Trainer =
  * TRAINER_USER_IDS when set, else Ambassador/TRAINING department staff; either way only
  * people with a year or more of tenure, so a new hire is never offered as a trainer.
+ * Office-only staff (unless on STAFFING_OFFICE_ALLOW_USER_IDS) and test users or anyone
+ * with no start date are left out of every pool and counted in `left_out`.
  */
 export async function loadStaffing(
   client: TandaClient,
@@ -136,10 +154,19 @@ export async function loadStaffing(
   const today = todayInZone();
   const excluded = coverageExcludedUserIds();
   const trainerIds = configuredTrainerIds();
+  const officeAllowed = officeAllowedIds();
 
   const supervisorStaff = new Set<number>();
   const trainerDeptStaff = new Set<number>();
   const firstSite = new Map<number, number>();
+  // Every real (non-bookkeeping) site each person is on staff at or rostered to, to spot office-only staff
+  const userSites = new Map<number, Set<number>>();
+  const addSite = (uid: number, loc: number | null) => {
+    if (loc === null || org.isBookkeepingLocation(loc)) return;
+    let sites = userSites.get(uid);
+    if (!sites) userSites.set(uid, (sites = new Set()));
+    sites.add(loc);
+  };
   for (const d of org.departments) {
     const staff = Array.isArray(d.staff) ? (d.staff as number[]) : [];
     const loc = (d.location_id as number | undefined) ?? null;
@@ -148,6 +175,7 @@ export async function loadStaffing(
     for (const uid of staff) {
       if (isSup) supervisorStaff.add(uid);
       if (isTrainer) trainerDeptStaff.add(uid);
+      addSite(uid, loc);
       if (!isSup && loc !== null && !org.isBookkeepingLocation(loc) && !firstSite.has(uid)) firstSite.set(uid, loc);
     }
   }
@@ -161,6 +189,7 @@ export async function loadStaffing(
     const deptId = (s.department_id as number | undefined) ?? null;
     const loc = deptId !== null ? org.deptLocation.get(deptId) ?? null : null;
     if (uid) {
+      addSite(uid, loc);
       hours.set(uid, (hours.get(uid) || 0) + h);
       if (loc !== null) {
         if (!hoursBySite.has(uid)) hoursBySite.set(uid, new Map());
@@ -182,10 +211,23 @@ export async function loadStaffing(
 
   const pools: Record<Role, Person[]> = { supervisor: [], trainer: [], cleaner: [], trainee: [] };
   const trainersTooNew: string[] = [];
+  const isOfficeOnly = (uid: number): boolean => {
+    const sites = [...(userSites.get(uid) || [])];
+    return sites.length > 0 && sites.every((loc) => OFFICE_SITE_RE.test(org.locationName(loc) ?? ''));
+  };
+  const leftOut = { office: 0, test_or_no_start_date: 0 };
   const minMonths = opts.minTenureMonths ?? 0;
   for (const u of people.users) {
     const id = u.id as number;
     if (u.active === false || excluded.has(id)) continue;
+    if (TEST_NAME_RE.test(String(u.name ?? '')) || !isDate(u.employment_start_date)) {
+      leftOut.test_or_no_start_date++;
+      continue;
+    }
+    if (!officeAllowed.has(id) && isOfficeOnly(id)) {
+      leftOut.office++;
+      continue;
+    }
     const tenure = tenureFrom(u.employment_start_date, today);
     if (minMonths > 0 && (tenure?.total_months ?? -1) < minMonths) continue;
     const levels = Array.isArray(u.user_levels) ? (u.user_levels as unknown[]) : [];
@@ -226,6 +268,7 @@ export async function loadStaffing(
         ? `TRAINER_USER_IDS (${trainerIds.size} configured)`
         : `Ambassador/TRAINING department staff with ${MIN_EXPERIENCED_MONTHS}+ months tenure (set TRAINER_USER_IDS to use an exact list)`,
       trainers_too_new: trainersTooNew,
+      left_out: leftOut,
       shifts_counted: schedules.length,
     },
   };
@@ -284,6 +327,14 @@ export function recommend(staffing: Staffing, need: Need, siteHours = 0): Recomm
   if (trainer.length < need.trainer) warnings.push(`No trainer with ${MIN_EXPERIENCED_MONTHS}+ months tenure found (${staffing.trainer_source}).`);
   if (staffing.trainers_too_new.length) {
     warnings.push(`${staffing.trainers_too_new.join(', ')} ${staffing.trainers_too_new.length === 1 ? 'is' : 'are'} on TRAINER_USER_IDS but under ${MIN_EXPERIENCED_MONTHS} months tenure, so not offered as a trainer.`);
+  }
+  const { office, test_or_no_start_date: tests } = staffing.left_out;
+  if (office || tests) {
+    const parts = [
+      office ? `${office} office-only (Administrative Office; allow with STAFFING_OFFICE_ALLOW_USER_IDS)` : '',
+      tests ? `${tests} test user${tests === 1 ? '' : 's'} or with no start date` : '',
+    ].filter(Boolean);
+    warnings.push(`Left out of every list: ${parts.join(', ')}.`);
   }
   return { cleaners, supervisor, trainer, warnings };
 }
