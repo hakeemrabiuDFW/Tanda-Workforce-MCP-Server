@@ -62,7 +62,9 @@ describe('MCP refresh tokens', () => {
 
     it('rejects a tampered, foreign or expired token', () => {
       const token = sealRefreshToken({ sid: 's1', uid: 7, at: 'A' });
-      const flipped = token.slice(0, -2) + (token.endsWith('A') ? 'B' : 'A') + token.slice(-1);
+      // Change the second-to-last character, choosing by that character so it always differs
+      const flipped = token.slice(0, -2) + (token.at(-2) === 'A' ? 'B' : 'A') + token.slice(-1);
+      expect(flipped).not.toBe(token);
       expect(openRefreshToken(flipped)).toBeNull();
       expect(openRefreshToken('not-a-token')).toBeNull();
       expect(openRefreshToken(undefined)).toBeNull();

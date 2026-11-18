@@ -10,7 +10,7 @@ const range = { from: FIXTURE_FROM, to: FIXTURE_TO };
 const EXPECTED = [
   'tanda_org', 'tanda_people', 'tanda_schedules', 'tanda_timesheets', 'tanda_live', 'tanda_time_off',
   'tanda_labor_summary', 'tanda_coverage', 'tanda_validate_schedule', 'tanda_exceptions',
-  'tanda_export_preview', 'tanda_change_history',
+  'tanda_export_preview', 'tanda_change_history', 'tanda_data_audit',
 ];
 
 /** One representative call per tool against the 84-site / 70-user fixture. */
@@ -27,6 +27,7 @@ export const SMOKE_CALLS: Array<[string, Record<string, unknown>]> = [
   ['tanda_exceptions', range],
   ['tanda_export_preview', { date: '2026-10-14' }],
   ['tanda_change_history', { type: 'shift', id: 1 }],
+  ['tanda_data_audit', {}],
 ];
 
 beforeAll(() => {
@@ -34,7 +35,7 @@ beforeAll(() => {
 });
 
 describe('tool surface', () => {
-  it('exposes the 12 v4 read tools, the two staffing app tools, plus the four write tools', () => {
+  it('exposes the 13 v4 read tools, the two staffing app tools, plus the four write tools', () => {
     expect(tandaTools.map((t) => t.name)).toEqual([...EXPECTED, 'conversation_to_site_schedule', 'staff_allocation_board', 'tanda_create_user', 'tanda_deactivate_user', 'tanda_approve_timesheets', 'tanda_update_user']);
   });
 
