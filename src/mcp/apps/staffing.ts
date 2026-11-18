@@ -163,8 +163,9 @@ export async function loadStaffing(
   const userSites = new Map<number, Set<number>>();
   const addSite = (uid: number, loc: number | null) => {
     if (loc === null || org.isBookkeepingLocation(loc)) return;
-    if (!userSites.has(uid)) userSites.set(uid, new Set());
-    (userSites.get(uid) as Set<number>).add(loc);
+    let sites = userSites.get(uid);
+    if (!sites) userSites.set(uid, (sites = new Set()));
+    sites.add(loc);
   };
   for (const d of org.departments) {
     const staff = Array.isArray(d.staff) ? (d.staff as number[]) : [];
