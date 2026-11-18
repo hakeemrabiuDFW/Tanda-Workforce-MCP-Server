@@ -13,7 +13,7 @@ See [docs/SECURITY.md](docs/SECURITY.md).
 
 Which Tanda identity each write tool may run as is set by [ADR 0001](docs/adr/0001-write-tool-identity.md).
 
-## Tools (12)
+## Tools (13)
 
 Every list tool returns `{ summary, rows, page }`. `rows` holds at most 50 entries and the whole response is at most 25 KB. When rows are cut, the response sets `truncated: true` and includes `page.next_offset` and a `how_to_page` hint. Time fields come as unix seconds plus `*_iso` strings in `America/New_York`, and `hours` is a decimal. `from`/`to` ranges up to 62 days are split into 7-day Tanda calls internally.
 
@@ -31,6 +31,7 @@ Every list tool returns `{ summary, rows, page }`. `rows` holds at most 50 entri
 | `tanda_exceptions` | Audit list: shifts open more than 12h, zero-length shifts, pending leave already in the past, unapproved timesheet $ by site, active staff with no award template, calendar workweeks over 40h, and `projected_over_40` for the current week (worked + still rostered). Weekly checks echo `week_basis` and each week's range. Unapproved cost is reported for the window (`window_unapproved_cost`) and for every pay period that has ended or is current (`all_open_periods_unapproved_cost`, `pending_open_periods`; looks back `OPEN_PERIOD_LOOKBACK_DAYS`, default 42). |
 | `tanda_export_preview` | Payroll export preview with `approved_only=true` and a hard-coded `skip_status_update=true`. Returns row count, totals and rows missing a pay code. Never returns the raw file. |
 | `tanda_change_history` | Version history from `/shifts/{id}/versions` or `/schedules/{id}/versions`. |
+| `tanda_data_audit` | Data-quality audit in one call (at most 12 Tanda reads). For each check, a count plus up to 20 sample ids: active staff with no award template, no `position_title`, or no shifts in the last `days` (default 14, max 35); sites with worked hours but $0 cost, or a cost per worked hour below `min_effective_rate` (default `MIN_EFFECTIVE_RATE`, 16.00); Supervisor-department staff who are in `COVERAGE_EXCLUDE_USER_IDS` or lack the `employee` level (the `tanda_coverage` rule); and pending leave whose start date has passed (looks back 28 days). Bookkeeping sites are left out. Each check fails soft: a missing scope sets that check's `count` to `null` and adds a `warnings` entry. Nothing is written. |
 
 ### Staffing apps (`conversation_to_site_schedule`, `staff_allocation_board`)
 
@@ -119,6 +120,7 @@ npm run build && npm start
 | `TRAINER_USER_IDS` | no | Comma-separated Tanda user ids who may train at a new site (`conversation_to_site_schedule`, `staff_allocation_board`). Unset: Ambassador/TRAINING department staff with 12+ months of tenure |
 | `STAFFING_OFFICE_ALLOW_USER_IDS` | no | Comma-separated Tanda user ids of office-only staff (`Administrative Office`) who may still be suggested by the staffing apps, e.g. operations staff who do site checks. Unset: office-only staff are left out |
 | `WORKWEEK_START` | no | First day of the overtime workweek (`SUN`…`SAT`). Default `MON` |
+| `MIN_EFFECTIVE_RATE` | no | `tanda_data_audit` flags sites whose cost per worked hour is below this. Default 16.00 |
 | `OPEN_PERIOD_LOOKBACK_DAYS` | no | How far back `tanda_exceptions` looks for still-pending pay periods. Default 42 |
 | `TANDA_BOOKKEEPING_LOCATION_IDS` | no | Default `281737,301754,396358` |
 | `TANDA_RATE_LIMIT_PER_MIN` | no | Client-side limit, default 80 (Tanda allows 100/min shared across password tokens) |

@@ -50,6 +50,7 @@ const calls = [
   ['tanda_exceptions', range],
   ['tanda_export_preview', { date: to }],
   ['tanda_change_history', null], // filled from tanda_timesheets
+  ['tanda_data_audit', {}],
   // MCP App tools: the data is in structuredContent, the text is a summary
   ['conversation_to_site_schedule', { site_name: 'Smoke test site' }],
   ['staff_allocation_board', { cleaners_needed: 2 }],
