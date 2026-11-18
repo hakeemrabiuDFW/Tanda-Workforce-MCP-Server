@@ -41,13 +41,21 @@ function staffingClient() {
     user(6, 'Finley Busy Hart', 50),        // experienced cleaner, 42 h
     user(7, 'Gray Newer Wolfe', 7),         // cleaner, lightest week
     user(8, 'Harper Rookie Lane', 1),       // trainee
-    user(9, 'Indigo Nodate Moss', null),    // no start date
+    user(9, 'Indigo Shortshift Moss', 4),   // cleaner with many short shifts
     user(10, 'Jules Training Frost', 18),   // trainer: TRAINING + 1y6m
+    // Left out of every pool (#111)
+    user(11, 'Kai Nodate Ross', null),      // no start date
+    user(12, 'Test Cleaner', 30),           // test user by name
+    user(13, 'ZZ Probe', 30),               // test user by name
+    user(14, 'Lane Owner Diaz', 60, ['employee', 'manager']), // office only, 0 h: would top the supervisor list
+    user(15, 'Morgan Office Banks', 60),    // office only, 0 h: would be the lead cleaner
+    user(16, 'Noel Ops Ward', 60),          // office and a field site: still a cleaner
   ];
   const locations = [
     { id: 100, name: 'Maple Street School' },
     { id: 200, name: 'Harbor Office Park' },
     { id: 281737, name: 'One Time Projects' },
+    { id: 300, name: 'Administrative Office' },
   ];
   const departments = [
     { id: 1001, name: 'Cleaning', location_id: 100, staff: [5, 6, 7, 8, 9, 4] },
@@ -55,6 +63,9 @@ function staffingClient() {
     { id: 1003, name: 'Ambassador', location_id: 100, staff: [3, 4] },
     { id: 2001, name: 'Cleaning', location_id: 200, staff: [6] },
     { id: 2002, name: 'TRAINING', location_id: 200, staff: [10] },
+    { id: 3001, name: 'Office', location_id: 300, staff: [14, 15, 16] },
+    { id: 2811, name: 'Projects', location_id: 281737, staff: [15] }, // a bookkeeping site does not make anyone field staff
+    { id: 2003, name: 'Cleaning', location_id: 200, staff: [11, 12, 13, 16] },
   ];
   let id = 1;
   const schedules: Body[] = [];
@@ -70,6 +81,8 @@ function staffingClient() {
   }
   add(5, 1001, '2026-10-12', 4);    // 4 h
   add(10, 2002, '2026-10-16', 3);   // 3 h, late in the week
+  add(16, 2003, '2026-10-13', 10);  // 20 h at a field site
+  add(16, 2003, '2026-10-14', 10);
   const routes: Array<[string | RegExp, RouteHandler]> = [
     ['/locations', () => locations],
     ['/departments', () => departments],
@@ -134,10 +147,10 @@ describe('staff_allocation_board', () => {
     for (const p of all) {
       expect(p.name).toMatch(/^\S+ [A-Z]\.$/);
       expect(typeof p.tenure_label).toBe('string');
-      if (p.id !== 9) expect(p.tenure).toEqual(expect.objectContaining({ years: expect.any(Number), months: expect.any(Number), total_months: expect.any(Number) }));
+      expect(p.tenure).toEqual(expect.objectContaining({ years: expect.any(Number), months: expect.any(Number), total_months: expect.any(Number) }));
     }
     expect(all.find((p: Body) => p.id === 3)).toMatchObject({ tenure: { years: 2, months: 2, total_months: 26 }, tenure_label: '2y 2m' });
-    expect(all.find((p: Body) => p.id === 9)).toMatchObject({ tenure: null, tenure_label: 'start date not set' });
+    expect(all.find((p: Body) => p.id === 9)).toMatchObject({ tenure: { years: 0, months: 4, total_months: 4 }, tenure_label: '4m' });
     expect(JSON.stringify(c)).not.toMatch(/Supervisor Stone|example\.com|\+1555|1990-01-01/);
   });
 
@@ -147,7 +160,40 @@ describe('staff_allocation_board', () => {
     expect(ids(c.pools.trainer).sort()).toEqual([10, 3]);        // Ambassador / TRAINING with a year or more
     expect(ids(c.pools.trainer)).not.toContain(4);               // Ambassador with 5 months
     expect(ids(c.pools.trainee)).toEqual([8]);
-    expect(ids(c.pools.cleaner).sort()).toEqual([4, 5, 6, 7, 9]);
+    expect(ids(c.pools.cleaner).sort((a, b) => a - b)).toEqual([4, 5, 6, 7, 9, 16]);
+  });
+
+  it('leaves office-only staff out of every pool, so they are never the lead cleaner or supervisor (#111)', async () => {
+    const { c, res } = await board({ cleaners_needed: 2 });
+    const all = ids([...c.pools.supervisor, ...c.pools.trainer, ...c.pools.cleaner, ...c.pools.trainee]);
+    expect(all).not.toContain(14);
+    expect(all).not.toContain(15);
+    expect(all).toContain(16);                                    // office plus a field site stays eligible
+    expect(c.recommendation.cleaners[0]).toMatchObject({ id: 5, lead: true });
+    expect(ids(c.recommendation.supervisor)).toEqual([2]);
+    expect(c.warnings.join(' ')).toContain('Left out of every list: 2 office-only (Administrative Office');
+    expect(res.summary).toContain('2 office-only');
+  });
+
+  it('keeps office staff on STAFFING_OFFICE_ALLOW_USER_IDS eligible (#111)', async () => {
+    process.env.STAFFING_OFFICE_ALLOW_USER_IDS = '14';
+    try {
+      const { c } = await board();
+      expect(ids(c.pools.supervisor)).toContain(14);
+      expect(ids(c.recommendation.supervisor)).toEqual([14]);       // 0 h, listed on purpose
+      expect(ids(c.pools.cleaner)).not.toContain(15);
+      expect(c.warnings.join(' ')).toContain('1 office-only');
+    } finally {
+      delete process.env.STAFFING_OFFICE_ALLOW_USER_IDS;
+    }
+  });
+
+  it('leaves test users and people with no start date out of every pool and counts them (#111)', async () => {
+    const { c } = await board();
+    const all = ids([...c.pools.supervisor, ...c.pools.trainer, ...c.pools.cleaner, ...c.pools.trainee]);
+    for (const id of [11, 12, 13]) expect(all).not.toContain(id);
+    expect(JSON.stringify(c.pools)).not.toContain('start date not set');
+    expect(c.warnings.join(' ')).toContain('3 test users or with no start date');
   });
 
   it('recommends an experienced lead cleaner, the lightest loads, and a trainer with a year or more', async () => {
@@ -166,7 +212,7 @@ describe('staff_allocation_board', () => {
   });
 
   it('suggests people who would pass 40 hours last', async () => {
-    const { c } = await board({ cleaners_needed: 5, hours_per_cleaner_per_week: 10 });
+    const { c } = await board({ cleaners_needed: 6, hours_per_cleaner_per_week: 10 });
     const order = ids(c.recommendation.cleaners);
     expect(order[order.length - 1]).toBe(6);                      // 42 h already
     expect(c.warnings.join(' ')).toContain('Finley H.');
@@ -213,9 +259,9 @@ describe('staff_allocation_board', () => {
 
   it('sorts and filters by tenure', async () => {
     const byTenure = (await board({ sort_by: 'tenure' })).c;
-    expect(ids(byTenure.pools.cleaner).slice(0, 3)).toEqual([6, 5, 7]);
+    expect(ids(byTenure.pools.cleaner).slice(0, 4)).toEqual([16, 6, 5, 7]);
     const veterans = (await board({ min_tenure_months: 12 })).c;
-    expect(ids(veterans.pools.cleaner).sort()).toEqual([5, 6]);
+    expect(ids(veterans.pools.cleaner).sort((a, b) => a - b)).toEqual([5, 6, 16]);
     expect(veterans.pools.trainee).toHaveLength(0);
   });
 

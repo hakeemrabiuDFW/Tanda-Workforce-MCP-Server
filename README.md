@@ -48,6 +48,7 @@ How people are described and chosen:
 - **Supervisor**: on the staff list of a `Supervisor`/`Supervisors` department, or with a user level containing `manager` or `supervisor`. `COVERAGE_EXCLUDE_USER_IDS` are left out.
 - **Trainer**: the users in `TRAINER_USER_IDS` when it is set, otherwise staff of an `Ambassador` or `TRAINING` department; either way only those with 12 or more months of tenure.
 - **Trainee**: under 3 months of tenure. Everyone else is a **cleaner**.
+- **Left out of every list**: people whose only site is `Administrative Office` (unless listed in `STAFFING_OFFICE_ALLOW_USER_IDS`), and test users (name starting `ZZ ` or `Test `) or anyone with no `employment_start_date`. `warnings` says how many were left out.
 - **Suggestions**: the lowest load first, and people the new site would push past 40 hours last. The first cleaner is the **lead** and has 12 or more months of tenure when anyone does. The trainer always has 12 or more months: a `TRAINER_USER_IDS` person with less is left off the trainer list and named in `warnings`. A site that already exists in Tanda gets no trainer in `conversation_to_site_schedule`.
 - **Names** are first name plus last initial.
 
@@ -116,6 +117,7 @@ npm run build && npm start
 | `COVERAGE_SUPERVISION_MODEL` | no | Default `supervision_model` for `tanda_coverage`: `site` (default) or `roving` |
 | `COVERAGE_ROVING_SITES` | no | Sites one roving supervisor covers at once. Default 5 |
 | `TRAINER_USER_IDS` | no | Comma-separated Tanda user ids who may train at a new site (`conversation_to_site_schedule`, `staff_allocation_board`). Unset: Ambassador/TRAINING department staff with 12+ months of tenure |
+| `STAFFING_OFFICE_ALLOW_USER_IDS` | no | Comma-separated Tanda user ids of office-only staff (`Administrative Office`) who may still be suggested by the staffing apps, e.g. operations staff who do site checks. Unset: office-only staff are left out |
 | `WORKWEEK_START` | no | First day of the overtime workweek (`SUN`…`SAT`). Default `MON` |
 | `OPEN_PERIOD_LOOKBACK_DAYS` | no | How far back `tanda_exceptions` looks for still-pending pay periods. Default 42 |
 | `TANDA_BOOKKEEPING_LOCATION_IDS` | no | Default `281737,301754,396358` |
