@@ -64,6 +64,7 @@ function scopeFor(path: string): string {
   if (path.startsWith('/shifts') || path.startsWith('/timesheets')) return 'timesheet';
   if (path.startsWith('/leave')) return 'leave';
   if (path.startsWith('/unavailability')) return 'unavailability';
+  if (path.startsWith('/clockins')) return 'device';
   return 'the required';
 }
 
@@ -364,6 +365,11 @@ export class TandaClient {
 
   async getActiveShifts(): Promise<Rec[]> {
     return this.getList('/shifts/active', {}, { noCache: true });
+  }
+
+  /** Raw clock-ins (with device ids) for one user. Needs the "device" scope. */
+  async getClockins(filter: { user_id: number; from: string; to: string }): Promise<Rec[]> {
+    return this.getList('/clockins', { user_id: String(filter.user_id), from: filter.from, to: filter.to });
   }
 
   async getVersions(kind: 'shifts' | 'schedules', id: number): Promise<Rec[]> {
