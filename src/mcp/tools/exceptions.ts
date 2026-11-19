@@ -2,7 +2,7 @@ import { Tool } from './types';
 import { ArgError, dateRange, idList, num, S } from '../args';
 import { guardResponse } from '../guard';
 import { departmentsForLocations, loadOrg, loadPeople } from '../context';
-import { Rec } from '../../tanda/client';
+import { Rec, TandaClient } from '../../tanda/client';
 import { itemDate, itemHours } from '../../tanda/normalize';
 import { addDays, round2, todayInZone, toUnixSeconds, toZonedISO } from '../../utils/time';
 import { OPEN_SHIFT_FLAG_HOURS } from './live';
@@ -12,6 +12,7 @@ import { soft, Warning, withWarnings } from '../warnings';
 export const CHECKS = [
   'open_shift_over_12h',
   'zero_length_shift',
+  'micro_shift',
   'stale_pending_leave',
   'unapproved_timesheet_cost',
   'missing_award_template',
@@ -25,6 +26,14 @@ const WEEKLY_LIMIT = 40;
 
 /** Default lookback for pending timesheets in earlier pay periods (OPEN_PERIOD_LOOKBACK_DAYS). */
 export const OPEN_PERIOD_LOOKBACK_DAYS = Number(process.env.OPEN_PERIOD_LOOKBACK_DAYS) || 42;
+/** Shifts shorter than this are micro-shifts (MIN_SHIFT_MINUTES, default 5). */
+export const MIN_SHIFT_MINUTES = Number(process.env.MIN_SHIFT_MINUTES) || 5;
+/** Clock-in and clock-out on the same device this close together look accidental. */
+export const ACCIDENTAL_CLOCKOUT_SECONDS = 60;
+/** Only the first micro-shifts get device and author detail: each costs 2 Tanda calls. */
+const MICRO_DETAIL_LIMIT = 10;
+/** How far a raw clock-in may sit from the shift's start/finish and still be its punch. */
+const CLOCKIN_MATCH_SECONDS = 120;
 
 /** Anything not yet approved or exported is unapproved exposure. */
 export function isUnapproved(status: unknown): boolean {
@@ -55,10 +64,58 @@ function exposure(sheets: Array<{ ts: Rec; cost: number; hours: number }>): Expo
   return { cost: round2(cost), hours: round2(hours), timesheets: sheets.length, period_ranges: [...ranges].sort() };
 }
 
+/** Author name from a Tanda version record. */
+function versionAuthor(v: Rec): string | null {
+  const a = v.author as Rec | undefined;
+  return (a?.name as string) ?? (v.user_name as string) ?? null;
+}
+
+interface MicroDetail {
+  device_match: boolean | 'unknown';
+  clock_gap_seconds: number | null;
+  created_by: string | null;
+  last_changed_by: string | null;
+}
+
+/** Device and author detail for one micro-shift. A lookup that fails soft once is skipped for the rest. */
+async function microDetail(client: TandaClient, shift: Rec, date: string, warnings: Warning[], skip: Set<string>): Promise<MicroDetail> {
+  const out: MicroDetail = { device_match: 'unknown', clock_gap_seconds: null, created_by: null, last_changed_by: null };
+  const start = toUnixSeconds(shift.start) as number;
+  const finish = toUnixSeconds(shift.finish) as number;
+
+  if (!skip.has('device')) {
+    const before = warnings.length;
+    const clockins = await soft(warnings, 'micro_shift.device', [] as Rec[],
+      () => client.getClockins({ user_id: shift.user_id as number, from: date, to: date }), { notFoundOk: true });
+    if (warnings.length > before) skip.add('device');
+    const near = (type: string, at: number) =>
+      clockins.find((c) => String(c.type || '').toLowerCase() === type && Math.abs((toUnixSeconds(c.time) ?? Infinity) - at) <= CLOCKIN_MATCH_SECONDS);
+    const cin = near('start', start);
+    const cout = near('finish', finish);
+    if (cin && cout) {
+      out.clock_gap_seconds = (toUnixSeconds(cout.time) as number) - (toUnixSeconds(cin.time) as number);
+      if (cin.device_id != null && cout.device_id != null) out.device_match = cin.device_id === cout.device_id;
+    }
+  }
+
+  if (!skip.has('history')) {
+    const before = warnings.length;
+    const versions = await soft(warnings, 'micro_shift.change_history', [] as Rec[],
+      () => client.getVersions('shifts', shift.id as number), { notFoundOk: true });
+    if (warnings.length > before) skip.add('history');
+    const sorted = [...versions].sort((a, b) => (toUnixSeconds(a.time) ?? 0) - (toUnixSeconds(b.time) ?? 0));
+    if (sorted.length) {
+      out.created_by = versionAuthor(sorted[0]);
+      out.last_changed_by = versionAuthor(sorted[sorted.length - 1]);
+    }
+  }
+  return out;
+}
+
 export const exceptionsTool: Tool = {
   name: 'tanda_exceptions',
   description:
-    'Returns payroll/compliance exceptions: shifts open > 12h, zero-length shifts, pending leave already in the past, unapproved timesheet $ by site, active staff with no award template or pay rate, and > 40h calendar workweeks (worked, and projected for the current week); use it as a daily/weekly audit.',
+    'Returns payroll/compliance exceptions: shifts open > 12h, zero-length and micro shifts, pending leave already in the past, unapproved timesheet $ by site, active staff with no award template or pay rate, and > 40h calendar workweeks (worked, and projected for the current week); use it as a daily/weekly audit.',
   inputSchema: {
     type: 'object',
     properties: {
@@ -67,6 +124,7 @@ export const exceptionsTool: Tool = {
       checks: { type: 'array', items: { type: 'string', enum: [...CHECKS] }, description: 'Subset of checks to run. Default all' },
       location_ids: S.locationIds,
       workweek_start: { type: 'string', enum: ['SUN', 'MON', 'TUE', 'WED', 'THU', 'FRI', 'SAT'], description: 'First day of the overtime workweek. Default WORKWEEK_START (MON)' },
+      min_shift_minutes: { type: 'number', description: `micro_shift threshold in minutes. Default ${MIN_SHIFT_MINUTES} (MIN_SHIFT_MINUTES), max 60` },
       open_period_lookback_days: { type: 'number', description: `How far back unapproved_timesheet_cost looks for still-pending pay periods. Default ${OPEN_PERIOD_LOOKBACK_DAYS}, max 90` },
       offset: S.offset,
       limit: S.limit,
@@ -83,6 +141,9 @@ export const exceptionsTool: Tool = {
     }
     const want = (c: Check) => checks.includes(c);
     const week = workweek(args.workweek_start);
+    const minShiftMinutes = num(args.min_shift_minutes, MIN_SHIFT_MINUTES) as number;
+    if (minShiftMinutes <= 0 || minShiftMinutes > 60) throw new ArgError('min_shift_minutes must be more than 0 and at most 60.');
+    const minShiftSeconds = minShiftMinutes * 60;
 
     const [org, people] = await Promise.all([loadOrg(client), loadPeople(client)]);
     const locIds = idList(args.location_ids);
@@ -100,6 +161,7 @@ export const exceptionsTool: Tool = {
       rows.push({ type, ...row });
     };
     const extra: Rec = {};
+    const warnings: Warning[] = [];
 
     if (want('open_shift_over_12h')) {
       const now = Math.floor(Date.now() / 1000);
@@ -114,7 +176,7 @@ export const exceptionsTool: Tool = {
     }
 
     const weeklyChecks = want('weekly_hours_over_40') || want('projected_over_40');
-    if (want('zero_length_shift') || weeklyChecks) {
+    if (want('zero_length_shift') || want('micro_shift') || weeklyChecks) {
       // Weekly totals use whole calendar workweeks, never the rolling window
       const today = todayInZone();
       const shiftTo = want('projected_over_40') && week.end(today) > week.end(to) ? week.end(today) : week.end(to);
@@ -129,6 +191,31 @@ export const exceptionsTool: Tool = {
           }
         }
       }
+      if (want('micro_shift')) {
+        const micro = shifts.filter((s) => {
+          const d = itemDate(s);
+          const st = toUnixSeconds(s.start);
+          const fi = toUnixSeconds(s.finish);
+          return d && d >= from && d <= to && inScope(s.department_id) && st !== null && fi !== null && fi - st > 0 && fi - st < minShiftSeconds;
+        });
+        const skip = new Set<string>();
+        for (const [i, s] of micro.entries()) {
+          const st = toUnixSeconds(s.start) as number;
+          const seconds = (toUnixSeconds(s.finish) as number) - st;
+          const detail = i < MICRO_DETAIL_LIMIT ? await microDetail(client, s, itemDate(s) as string, warnings, skip) : null;
+          const deviceMatch = detail?.device_match ?? 'unknown';
+          add('micro_shift', {
+            shift_id: s.id, user_id: s.user_id, user_name: name(s.user_id), date: itemDate(s), ...site(s.department_id),
+            start_iso: toZonedISO(st), finish_iso: toZonedISO(s.finish), seconds, device_match: deviceMatch,
+            ...(detail?.clock_gap_seconds != null ? { clock_gap_seconds: detail.clock_gap_seconds } : {}),
+            // Same device within 60s; with no device data the duration alone decides
+            likely_accidental_clockout: seconds <= ACCIDENTAL_CLOCKOUT_SECONDS && deviceMatch !== false,
+            ...(detail ? { created_by: detail.created_by, last_changed_by: detail.last_changed_by } : { detail: `not looked up (over ${MICRO_DETAIL_LIMIT} micro-shifts)` }),
+          });
+        }
+        extra.micro_shift_basis = `shifts under ${minShiftMinutes} min; likely_accidental_clockout = clock-in and clock-out within ${ACCIDENTAL_CLOCKOUT_SECONDS}s on the same device (duration alone when device data is unavailable)`;
+      }
+
       if (weeklyChecks) {
         extra.week_basis = week.basis;
         const worked = new Map<string, number>();
@@ -271,7 +358,6 @@ export const exceptionsTool: Tool = {
       }
     }
 
-    const warnings: Warning[] = [];
     if (want('missing_pay_rate')) {
       // #94: staff with no rate cost $0 on every timesheet. Wages only come back with the "cost" scope.
       const withWages = await soft(warnings, 'missing_pay_rate', [] as Rec[], () => client.getUsers({ show_wages: true, freshMs: 60_000 }));
