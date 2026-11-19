@@ -70,6 +70,13 @@ function versionAuthor(v: Rec): string | null {
   return (a?.name as string) ?? (v.user_name as string) ?? null;
 }
 
+interface Micro {
+  shift: Rec;
+  date: string;
+  start: number;
+  finish: number;
+}
+
 interface MicroDetail {
   device_match: boolean | 'unknown';
   clock_gap_seconds: number | null;
@@ -78,22 +85,21 @@ interface MicroDetail {
 }
 
 /** Device and author detail for one micro-shift. A lookup that fails soft once is skipped for the rest. */
-async function microDetail(client: TandaClient, shift: Rec, date: string, warnings: Warning[], skip: Set<string>): Promise<MicroDetail> {
+async function microDetail(client: TandaClient, m: Micro, warnings: Warning[], skip: Set<string>): Promise<MicroDetail> {
   const out: MicroDetail = { device_match: 'unknown', clock_gap_seconds: null, created_by: null, last_changed_by: null };
-  const start = toUnixSeconds(shift.start) as number;
-  const finish = toUnixSeconds(shift.finish) as number;
+  const { shift, date, start, finish } = m;
 
   if (!skip.has('device')) {
     const before = warnings.length;
     const clockins = await soft(warnings, 'micro_shift.device', [] as Rec[],
-      () => client.getClockins({ user_id: shift.user_id as number, from: date, to: date }), { notFoundOk: true });
+      () => client.getClockins({ user_id: Number(shift.user_id), from: date, to: date }), { notFoundOk: true });
     if (warnings.length > before) skip.add('device');
     const near = (type: string, at: number) =>
       clockins.find((c) => String(c.type || '').toLowerCase() === type && Math.abs((toUnixSeconds(c.time) ?? Infinity) - at) <= CLOCKIN_MATCH_SECONDS);
     const cin = near('start', start);
     const cout = near('finish', finish);
     if (cin && cout) {
-      out.clock_gap_seconds = (toUnixSeconds(cout.time) as number) - (toUnixSeconds(cin.time) as number);
+      out.clock_gap_seconds = (toUnixSeconds(cout.time) ?? 0) - (toUnixSeconds(cin.time) ?? 0);
       if (cin.device_id != null && cout.device_id != null) out.device_match = cin.device_id === cout.device_id;
     }
   }
@@ -101,7 +107,7 @@ async function microDetail(client: TandaClient, shift: Rec, date: string, warnin
   if (!skip.has('history')) {
     const before = warnings.length;
     const versions = await soft(warnings, 'micro_shift.change_history', [] as Rec[],
-      () => client.getVersions('shifts', shift.id as number), { notFoundOk: true });
+      () => client.getVersions('shifts', Number(shift.id)), { notFoundOk: true });
     if (warnings.length > before) skip.add('history');
     const sorted = [...versions].sort((a, b) => (toUnixSeconds(a.time) ?? 0) - (toUnixSeconds(b.time) ?? 0));
     if (sorted.length) {
@@ -192,21 +198,23 @@ export const exceptionsTool: Tool = {
         }
       }
       if (want('micro_shift')) {
-        const micro = shifts.filter((s) => {
+        const micro: Micro[] = [];
+        for (const s of shifts) {
           const d = itemDate(s);
           const st = toUnixSeconds(s.start);
           const fi = toUnixSeconds(s.finish);
-          return d && d >= from && d <= to && inScope(s.department_id) && st !== null && fi !== null && fi - st > 0 && fi - st < minShiftSeconds;
-        });
+          if (!d || d < from || d > to || !inScope(s.department_id) || st === null || fi === null) continue;
+          if (fi - st > 0 && fi - st < minShiftSeconds) micro.push({ shift: s, date: d, start: st, finish: fi });
+        }
         const skip = new Set<string>();
-        for (const [i, s] of micro.entries()) {
-          const st = toUnixSeconds(s.start) as number;
-          const seconds = (toUnixSeconds(s.finish) as number) - st;
-          const detail = i < MICRO_DETAIL_LIMIT ? await microDetail(client, s, itemDate(s) as string, warnings, skip) : null;
+        for (const [i, m] of micro.entries()) {
+          const s = m.shift;
+          const seconds = m.finish - m.start;
+          const detail = i < MICRO_DETAIL_LIMIT ? await microDetail(client, m, warnings, skip) : null;
           const deviceMatch = detail?.device_match ?? 'unknown';
           add('micro_shift', {
-            shift_id: s.id, user_id: s.user_id, user_name: name(s.user_id), date: itemDate(s), ...site(s.department_id),
-            start_iso: toZonedISO(st), finish_iso: toZonedISO(s.finish), seconds, device_match: deviceMatch,
+            shift_id: s.id, user_id: s.user_id, user_name: name(s.user_id), date: m.date, ...site(s.department_id),
+            start_iso: toZonedISO(m.start), finish_iso: toZonedISO(m.finish), seconds, device_match: deviceMatch,
             ...(detail?.clock_gap_seconds != null ? { clock_gap_seconds: detail.clock_gap_seconds } : {}),
             // Same device within 60s; with no device data the duration alone decides
             likely_accidental_clockout: seconds <= ACCIDENTAL_CLOCKOUT_SECONDS && deviceMatch !== false,
