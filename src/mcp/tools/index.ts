@@ -16,6 +16,7 @@ import { validateScheduleTool } from './validate';
 import { exceptionsTool } from './exceptions';
 import { exportPreviewTool } from './exportPreview';
 import { changeHistoryTool } from './changeHistory';
+import { dataAuditTool } from './dataAudit';
 import { createUserTool, CREATE_USER_TOOL } from './createUser';
 import { deactivateUserTool, DEACTIVATE_USER_TOOL } from './deactivateUser';
 import { approveTimesheetsTool, APPROVE_TIMESHEETS_TOOL } from './approveTimesheets';
@@ -42,6 +43,7 @@ export const TOOLS: Tool[] = [
   exceptionsTool,
   exportPreviewTool,
   changeHistoryTool,
+  dataAuditTool,
   siteScheduleTool,
   allocationBoardTool,
   createUserTool,

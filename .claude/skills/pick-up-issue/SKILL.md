@@ -27,6 +27,16 @@ branch = one PR. Production only ever receives what passed on staging.
   parsers, fail soft with `warnings[]`).
 - Add tests in `tests/` for the change and its failure path. Update README /
   docs when users or deployers would notice.
+- Use the shared skills in `.claude/skills/` (named
+  `mattpocock-skills:<name>` where only Matt's plugin is loaded):
+  `tdd` for the test-first loop; `diagnosing-bugs` when the issue is a bug,
+  an error or a slowdown; `codebase-design` when the change adds or reshapes
+  a module; `domain-modeling` when it adds a domain term (update `CONTEXT.md`);
+  `research` when it rests on an outside API's behaviour;
+  `resolving-merge-conflicts` for a conflict with `staging`; `create-mcp-app`
+  and `add-app-to-server` for a screen that shows inside Claude. Runs are
+  unattended, so skip the ones that need a person to answer (`grilling`,
+  `grill-me`, `wizard`, `prototype`). `retro` is Hakeem's only.
 - Run all of these and fix anything red before pushing:
   `npm run lint && npx tsc --noEmit && npm test -- --ci && npm run build`
 

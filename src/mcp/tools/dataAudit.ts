@@ -1,0 +1,162 @@
+import { Tool } from './types';
+import { ArgError, num } from '../args';
+import { guardResponse } from '../guard';
+import { coverageExcludedUserIds, hasLevel, loadOrg, loadPeople, orgFrom, People } from '../context';
+import { Rec } from '../../tanda/client';
+import { itemCost, itemDate, itemHours } from '../../tanda/normalize';
+import { addDays, round2, todayInZone } from '../../utils/time';
+import { soft, Warning, withWarnings } from '../warnings';
+
+const MAX_SAMPLES = 20;
+export const MAX_AUDIT_DAYS = 35;
+/** Pending leave is looked for this far back (5 Tanda calls at most). */
+export const LEAVE_LOOKBACK_DAYS = 28;
+
+/** Sites whose cost per worked hour is below this are flagged (MIN_EFFECTIVE_RATE, default 16.00). */
+export function defaultMinEffectiveRate(): number {
+  const rate = Number(process.env.MIN_EFFECTIVE_RATE);
+  return Number.isFinite(rate) && rate > 0 ? rate : 16;
+}
+
+interface CheckResult {
+  check: string;
+  description: string;
+  /** null when the check was skipped (see warnings). */
+  count: number | null;
+  sample_ids: unknown[];
+  samples: Rec[];
+}
+
+const idName = (r: Rec): Rec => ({ id: r.id, name: r.name ?? null });
+
+function result<T>(check: string, description: string, items: T[] | null, sample: (r: T) => Rec): CheckResult {
+  if (items === null) return { check, description, count: null, sample_ids: [], samples: [] };
+  const samples = items.slice(0, MAX_SAMPLES).map(sample);
+  return { check, description, count: items.length, sample_ids: samples.map((s) => s.id), samples };
+}
+
+interface SiteCost {
+  id: number | null;
+  name: string | null;
+  hours: number;
+  cost: number;
+  effective_rate: number | null;
+}
+
+export const dataAuditTool: Tool = {
+  name: 'tanda_data_audit',
+  description:
+    'Returns a data-quality audit in one call (counts plus up to 20 sample ids): staff missing an award template or position title, staff with no recent shifts, sites with $0 or below-minimum cost per hour, non-supervisors in Supervisor departments, and stale pending leave.',
+  inputSchema: {
+    type: 'object',
+    properties: {
+      days: { type: 'number', description: `Look-back for the shift-based checks. Default 14, max ${MAX_AUDIT_DAYS}` },
+      min_effective_rate: { type: 'number', description: 'Flag sites whose cost per worked hour is below this. Default MIN_EFFECTIVE_RATE (16.00)' },
+    },
+  },
+  async run(client, args) {
+    const days = Math.min(Math.max(Math.floor(num(args.days, 14) as number), 1), MAX_AUDIT_DAYS);
+    const minRate = num(args.min_effective_rate, defaultMinEffectiveRate()) as number;
+    if (!(minRate > 0)) throw new ArgError('min_effective_rate must be a number above 0.');
+    const today = todayInZone();
+    const from = addDays(today, -(days - 1));
+    const yesterday = addDays(today, -1);
+    const warnings: Warning[] = [];
+
+    // Each check fails soft: a missing scope skips the checks that need it and adds a warning.
+    const [org, people, shifts, leave] = await Promise.all([
+      soft(warnings, 'site_lookup', orgFrom([], []), () => loadOrg(client)),
+      soft(warnings, 'user_lookup', null as People | null, () => loadPeople(client)),
+      soft(warnings, 'shifts', null as Rec[] | null, () => client.getShifts({ from, to: today, show_costs: true })),
+      soft(warnings, 'stale_pending_leave', null as Rec[] | null, () =>
+        client.getLeaveRequests({ from: addDays(today, -LEAVE_LOOKBACK_DAYS), to: yesterday, status: 'pending' })),
+    ]);
+    const active = people ? people.users.filter((u) => u.active !== false) : null;
+    const results: CheckResult[] = [];
+
+    results.push(result('missing_award_template', 'Active users with no award_template_id',
+      active && active.filter((u) => u.award_template_id === null || u.award_template_id === undefined), idName));
+
+    const worked = shifts ? new Set(shifts.map((s) => s.user_id)) : null;
+    results.push(result('no_recent_shifts', `Active users with no shifts in the last ${days} days`,
+      active && worked && active.filter((u) => !worked.has(u.id)), idName));
+
+    // Site cost checks only mean something when Tanda returned costs (the cost scope)
+    let bySite: SiteCost[] | null = null;
+    if (shifts) {
+      if (shifts.length && !shifts.some((s) => typeof s.cost === 'number')) {
+        for (const check of ['zero_cost_sites', 'low_effective_rate']) warnings.push({ check, reason: 'missing scope: cost (shifts came back without costs)' });
+      } else {
+        const sites = new Map<number | null, { hours: number; cost: number }>();
+        for (const s of shifts) {
+          const d = itemDate(s);
+          if (!d || d < from || d > today) continue;
+          const dept = s.department_id as number | null | undefined;
+          const loc = dept !== undefined && dept !== null ? org.deptLocation.get(dept) ?? null : null;
+          if (org.isBookkeepingLocation(loc)) continue;
+          const b = sites.get(loc) || { hours: 0, cost: 0 };
+          b.hours += itemHours(s);
+          b.cost += itemCost(s);
+          sites.set(loc, b);
+        }
+        bySite = [...sites.entries()]
+          .filter(([, b]) => b.hours > 0)
+          .map(([id, b]) => ({ id, name: org.locationName(id), hours: round2(b.hours), cost: round2(b.cost), effective_rate: b.cost > 0 ? round2(b.cost / b.hours) : null }))
+          .sort((a, b) => b.hours - a.hours);
+      }
+    }
+    const siteSample = (s: SiteCost): Rec => ({ ...s });
+    results.push(result('zero_cost_sites', `Sites with worked hours but $0 cost in the last ${days} days`,
+      bySite && bySite.filter((s) => s.cost === 0), siteSample));
+    results.push(result('low_effective_rate', `Sites whose cost per worked hour is below $${minRate.toFixed(2)} in the last ${days} days`,
+      bySite && bySite
+        .filter((s) => s.effective_rate !== null && s.effective_rate < minRate)
+        .sort((a, b) => (a.effective_rate as number) - (b.effective_rate as number)), siteSample));
+
+    // Same rule tanda_coverage uses (WFM-006): excluded users and those without the employee level aren't supervisors
+    const excluded = coverageExcludedUserIds();
+    const supStaff = new Set<number>();
+    for (const id of org.supervisorDeptIds) for (const uid of (org.departmentById.get(id)?.staff as number[]) || []) supStaff.add(uid);
+    const notSupervisors = people
+      ? [...supStaff].flatMap((uid) => {
+          const u = people.byId.get(uid);
+          if (!u || u.active === false) return [];
+          const reason = excluded.has(uid) ? 'in COVERAGE_EXCLUDE_USER_IDS' : !hasLevel(u, 'employee') ? 'no employee level' : null;
+          return reason ? [{ id: uid, name: u.name ?? null, reason }] : [];
+        })
+      : null;
+    results.push(result('non_supervisors_in_supervisor_depts', 'Users in a Supervisor department who are in COVERAGE_EXCLUDE_USER_IDS or lack the employee level',
+      notSupervisors, (r) => ({ ...r })));
+
+    if (active && active.length && !active.some((u) => 'position_title' in u)) {
+      warnings.push({ check: 'missing_position_title', reason: 'position_title is not returned on user records for this token' });
+      results.push(result('missing_position_title', 'Active users with no position_title', null, idName));
+    } else {
+      results.push(result('missing_position_title', 'Active users with no position_title',
+        active && active.filter((u) => u.position_title === null || u.position_title === undefined || String(u.position_title).trim() === ''), idName));
+    }
+
+    const stale = leave && leave.filter((l) => {
+      const start = String(l.start ?? '').slice(0, 10);
+      return start !== '' && start < today;
+    });
+    results.push(result('stale_pending_leave', `Pending leave whose start date has passed (looks back ${LEAVE_LOOKBACK_DAYS} days)`,
+      stale, (l) => ({ id: l.id, user_id: l.user_id, user_name: people?.name(l.user_id) ?? null, leave_type: l.leave_type ?? null, start: l.start })));
+
+    return guardResponse(
+      {
+        as_of: today,
+        days,
+        shift_window: `${from}..${today}`,
+        min_effective_rate: minRate,
+        active_users: active ? active.length : null,
+        flagged: results.reduce((n, r) => n + (r.count || 0), 0),
+        by_check: Object.fromEntries(results.map((r) => [r.check, r.count])),
+        ...(warnings.length ? { checks_skipped: [...new Set(warnings.map((w) => w.check))] } : {}),
+        note: 'Audit only; nothing was written to Tanda.',
+      },
+      results,
+      { extra: withWarnings(warnings) }
+    );
+  },
+};
