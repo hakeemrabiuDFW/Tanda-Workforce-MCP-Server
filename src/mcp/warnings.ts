@@ -4,6 +4,8 @@ import { TandaApiError } from '../tanda/client';
 export interface Warning {
   check: string;
   reason: string;
+  /** Set when Tanda kept returning 429 after our retries: try again in a minute. */
+  rate_limited?: true;
 }
 
 export interface SoftOptions {
@@ -11,16 +13,18 @@ export interface SoftOptions {
   notFoundOk?: boolean;
 }
 
-/** Warning for a Tanda error that a single check can survive (a missing scope), else null. */
+/** Warning for a Tanda error that a single check can survive (a missing scope, a rate limit), else null. */
 export function warningFor(check: string, error: unknown, opts: SoftOptions = {}): Warning | null {
   if (!(error instanceof TandaApiError)) return null;
+  if (error.statusCode === 429) return { check, reason: 'Tanda rate limit reached; retry in a minute', rate_limited: true };
   if (error.statusCode === 403) return { check, reason: `missing scope: ${error.scope ?? 'unknown'}` };
   if (error.statusCode === 404 && opts.notFoundOk) return { check, reason: 'not available from Tanda (404)' };
   return null;
 }
 
 /**
- * Run one check's Tanda call. On a 403 (missing scope), record a warning
+ * Run one check's Tanda call. On a 403 (missing scope) or a 429 that outlasted the client's
+ * retries, record a warning
  * and return `fallback` so the other checks still run; any other error propagates.
  */
 export async function soft<T>(warnings: Warning[], check: string, fallback: T, fn: () => Promise<T>, opts: SoftOptions = {}): Promise<T> {

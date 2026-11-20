@@ -42,6 +42,12 @@ export class ETagCache {
     if (entry) this.set(key, { ...entry, storedAt: Date.now() });
   }
 
+  /** Drop every entry for one token scope whose path starts with `pathPrefix` (e.g. after a write). */
+  deleteMatching(scope: string, pathPrefix: string): void {
+    const prefix = `${scope}|${pathPrefix}`;
+    for (const key of [...this.map.keys()]) if (key.startsWith(prefix)) this.map.delete(key);
+  }
+
   clear(): void {
     this.map.clear();
   }

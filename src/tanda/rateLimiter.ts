@@ -1,7 +1,12 @@
 /**
  * Client-side limiter for Tanda API calls. Tanda allows 100 requests/minute shared
- * across password tokens, so we stay under that with a single process-wide budget
- * (default 80/min, override with TANDA_RATE_LIMIT_PER_MIN).
+ * across password tokens, so every tool and token draws on one process-wide budget
+ * (default 90/min, override with TANDA_RATE_LIMIT_PER_MIN).
+ *
+ * A sliding window rather than a refilling token bucket: a bucket that starts full can
+ * send its whole burst and then a minute's refill inside one rolling minute (up to 2x
+ * the limit), which would go over Tanda's 100. The window never sends more than
+ * `limit` in any 60 seconds.
  */
 export class SlidingWindowLimiter {
   private timestamps: number[] = [];
@@ -35,5 +40,6 @@ export class SlidingWindowLimiter {
   }
 }
 
-const perMinute = Number(process.env.TANDA_RATE_LIMIT_PER_MIN) || 80;
+export const DEFAULT_TANDA_RATE_LIMIT_PER_MIN = 90;
+const perMinute = Number(process.env.TANDA_RATE_LIMIT_PER_MIN) || DEFAULT_TANDA_RATE_LIMIT_PER_MIN;
 export const tandaRateLimiter = new SlidingWindowLimiter(perMinute);
