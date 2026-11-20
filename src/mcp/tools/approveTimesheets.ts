@@ -19,7 +19,7 @@ const SHARED_REFUSAL = `${APPROVE_TIMESHEETS_TOOL} needs a person's own Tanda lo
 /** Periods that ended longer ago than this need allow_past_period (they are likely paid already). */
 const PAST_PERIOD_DAYS = 14;
 const MAX_SHIFT_HOURS = 12;
-const WEEKLY_LIMIT = 40;
+export const WEEKLY_LIMIT = 40;
 /** A roster finish is only used to fill a missing clock-out if the result is at most this long. */
 const MAX_FILLED_HOURS = 16;
 export const EXCEPTION_MARK = 'MCP-EXCEPTION';
@@ -71,8 +71,8 @@ function rosterFinish(shift: Rec, schedules: Rec[]): number | null {
   return finish;
 }
 
-/** Flags, fixes and exception notes for one timesheet's shifts. */
-function planShifts(ts: Rec, schedules: Rec[], fillMissing: boolean, today: string, weekStart: (d: string) => string): Pick<Plan, 'flags' | 'shift_changes'> {
+/** Flags, fixes and exception notes for one timesheet's shifts. Shared with tanda_approval_queue, so "clean" there means no flags here. */
+export function planShifts(ts: Rec, schedules: Rec[], fillMissing: boolean, today: string, weekStart: (d: string) => string): Pick<Plan, 'flags' | 'shift_changes'> {
   const flags: Plan['flags'] = [];
   const changes = new Map<number, ShiftChange>();
   const shifts = (ts.shifts as Rec[]).slice().sort((a, b) => (toUnixSeconds(a.start) ?? 0) - (toUnixSeconds(b.start) ?? 0));
