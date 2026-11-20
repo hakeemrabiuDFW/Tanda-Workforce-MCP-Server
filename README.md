@@ -1,6 +1,6 @@
 # Tanda Workforce MCP Server v4.0.1
 
-A read-only MCP (Model Context Protocol) server for the Tanda / Workforce.com API, with four guarded exceptions: creating employees, deactivating them, updating their pay rate and similar fields, and approving timesheets. It exposes 12 consolidated read tools and two read-only staffing apps (interactive MCP App views), plus four write tools (`tanda_create_user`, `tanda_deactivate_user`, `tanda_update_user`, `tanda_approve_timesheets`) when `TANDA_WRITES_ENABLED=true`. Every tool is privacy-filtered and returns at most 25 KB, so assistants like Claude can answer workforce questions without overflowing their context.
+A read-only MCP (Model Context Protocol) server for the Tanda / Workforce.com API, with four guarded exceptions: creating employees, deactivating them, updating their pay rate and similar fields, and approving timesheets. It exposes 13 consolidated read tools and two read-only staffing apps (interactive MCP App views), plus four write tools (`tanda_create_user`, `tanda_deactivate_user`, `tanda_update_user`, `tanda_approve_timesheets`) when `TANDA_WRITES_ENABLED=true`. Every tool is privacy-filtered and returns at most 25 KB, so assistants like Claude can answer workforce questions without overflowing their context.
 
 ## Security
 
@@ -8,12 +8,13 @@ A read-only MCP (Model Context Protocol) server for the Tanda / Workforce.com AP
 - **Read-only, with four guarded exceptions.** The Tanda client refuses any non-GET request except `POST /users`, `POST /users/{id}/invite`, `DELETE /users/{id}`, `PUT /users/{id}`, `PUT /timesheets/{id}` and `PUT /shifts/{id}`, and refuses those too unless `TANDA_WRITES_ENABLED=true` (off by default).
 - **Least-privilege scopes.** The server requests `me roster timesheet department user cost leave`. It never requests `financial` or `personal`. `unavailability` is off by default because Workforce.com's OAuth fails when it is requested; add it to `TANDA_SCOPES` only if your OAuth app supports it.
 - **Privacy by default.** User records are whitelisted, and `date_of_birth`, `phone`, `email`, `legal_*` and `hourly_rate` are returned only when the `fields` parameter names them. `passcode`, `tax_*`, `bank_*` and `super_*` are never returned.
+- **Inside Tanda's rate limit.** Every tool shares one budget of 90 Tanda requests per rolling minute (Tanda allows 100). A `429` is retried up to 3 times (Tanda's `Retry-After`, else 2s, 4s, 8s). If it still fails, a check that can fail soft returns a `warnings` entry with `rate_limited: true` instead of failing the tool. Sites and teams are cached for 24 hours, and so are people, except that a user write clears the people cache straight away.
 
 See [docs/SECURITY.md](docs/SECURITY.md).
 
 Which Tanda identity each write tool may run as is set by [ADR 0001](docs/adr/0001-write-tool-identity.md).
 
-## Tools (13)
+## Tools (14)
 
 Every list tool returns `{ summary, rows, page }`. `rows` holds at most 50 entries and the whole response is at most 25 KB. When rows are cut, the response sets `truncated: true` and includes `page.next_offset` and a `how_to_page` hint. Time fields come as unix seconds plus `*_iso` strings in `America/New_York`, and `hours` is a decimal. `from`/`to` ranges up to 62 days are split into 7-day Tanda calls internally.
 
@@ -28,10 +29,12 @@ Every list tool returns `{ summary, rows, page }`. `rows` holds at most 50 entri
 | `tanda_labor_summary` | Scheduled vs actual hours and cost, with variance, grouped by `location`, `day`, `department` or `user`. |
 | `tanda_coverage` | Supervisor coverage. `mode=gaps` lists times staff are on site with no supervisor; `mode=overlaps` lists two supervisors at one site or one supervisor double-booked. `supervision_model=site` (default) needs a supervisor at every staffed site; `roving` lets one supervisor on duty cover `sites_per_supervisor` sites. Up to 10 suggested moves, which only name users with the `employee` level who are rostered that day or confirmed available, and never anyone in `COVERAGE_EXCLUDE_USER_IDS`. Returns `assumptions[]`. Optional `window_start`/`window_end` (e.g. 17:00–22:00). |
 | `tanda_validate_schedule` | Checks proposed shifts against rosters, leave, unavailability, the 12h shift limit, the 40h week and double-booking. Each check fails soft: a missing scope skips that check and adds `warnings: [{ check, reason }]` instead of failing the call. Weekly hours use the same calendar workweek as `tanda_exceptions` (`workweek_start`, echoed as `week_basis`). Nothing is written. |
-| `tanda_exceptions` | Audit list: shifts open more than 12h, zero-length shifts, pending leave already in the past, unapproved timesheet $ by site, active staff with no award template, calendar workweeks over 40h, and `projected_over_40` for the current week (worked + still rostered). Weekly checks echo `week_basis` and each week's range. Unapproved cost is reported for the window (`window_unapproved_cost`) and for every pay period that has ended or is current (`all_open_periods_unapproved_cost`, `pending_open_periods`; looks back `OPEN_PERIOD_LOOKBACK_DAYS`, default 42). |
+| `tanda_exceptions` | Audit list: shifts open more than 12h, zero-length shifts, `micro_shift` (shifts under `MIN_SHIFT_MINUTES`, default 5, or `min_shift_minutes`; each row has `seconds`, `device_match`, `likely_accidental_clockout` for a same-device clock-out within 60s, and the change-history `created_by` / `last_changed_by` for the first 10. Device data needs the `device` scope; without it the check warns once and judges by duration alone), pending leave already in the past, unapproved timesheet $ by site, active staff with no award template, calendar workweeks over 40h, and `projected_over_40` for the current week (worked + still rostered). Weekly checks echo `week_basis` and each week's range. Unapproved cost is reported for the window (`window_unapproved_cost`) and for every pay period that has ended or is current (`all_open_periods_unapproved_cost`, `pending_open_periods`; looks back `OPEN_PERIOD_LOOKBACK_DAYS`, default 42). |
 | `tanda_export_preview` | Payroll export preview with `approved_only=true` and a hard-coded `skip_status_update=true`. Returns row count, totals and rows missing a pay code. Never returns the raw file. |
 | `tanda_change_history` | Version history from `/shifts/{id}/versions` or `/schedules/{id}/versions`. |
 | `tanda_data_audit` | Data-quality audit in one call (at most 12 Tanda reads). For each check, a count plus up to 20 sample ids: active staff with no award template, no `position_title`, or no shifts in the last `days` (default 14, max 35); sites with worked hours but $0 cost, or a cost per worked hour below `min_effective_rate` (default `MIN_EFFECTIVE_RATE`, 16.00); Supervisor-department staff who are in `COVERAGE_EXCLUDE_USER_IDS` or lack the `employee` level (the `tanda_coverage` rule); and pending leave whose start date has passed (looks back 28 days). Bookkeeping sites are left out. Each check fails soft: a missing scope sets that check's `count` to `null` and adds a `warnings` entry. Nothing is written. |
+| `tanda_pay_periods` | Current and prior pay periods (`prior_periods`, default 1, max 4) from `PAY_CALENDAR`, including the biweekly-to-weekly cutover (last biweekly period 2026-12-14..2026-12-27, first weekly 2026-12-28..2027-01-03), plus the next period and any `cadence_changes`. Each period row has a pending / approved / exported rollup with timesheets, hours and $ by status, and `unapproved_cost`. Warns (`tanda_period_alignment`) when Tanda's own timesheet periods don't match the calendar, and (`pay_calendar`) when `PAY_CALENDAR` is malformed. Nothing is written. |
+| `tanda_approval_queue` | Pending timesheets for the `current` (default) or `previous` pay period from `PAY_CALENDAR`, or `from`/`to`, split into `clean` and `needs_review` (`queue` picks one). It runs the same checks as `tanda_approve_timesheets`, so `clean` means that tool would approve it with no `MCP-EXCEPTION` note; `review_reasons` lists the flags (missing clock-out, zero-length shift, shift over 12h, no pay code, workweek over 40h) and the summary counts them `by_reason`. Each row's `pay_codes` gives hours, $ and a plain `why` built from the code's name and Tanda's award lines: the time window, the days, the rate multiple against the regular code, and for overtime which workweek went over 40h. The summary has `clean_timesheet_ids` to hand to `tanda_approve_timesheets`. Listed even when writes are off. Nothing is written. |
 
 ### Staffing apps (`conversation_to_site_schedule`, `staff_allocation_board`)
 
@@ -122,8 +125,10 @@ npm run build && npm start
 | `WORKWEEK_START` | no | First day of the overtime workweek (`SUN`…`SAT`). Default `MON` |
 | `MIN_EFFECTIVE_RATE` | no | `tanda_data_audit` flags sites whose cost per worked hour is below this. Default 16.00 |
 | `OPEN_PERIOD_LOOKBACK_DAYS` | no | How far back `tanda_exceptions` looks for still-pending pay periods. Default 42 |
+| `MIN_SHIFT_MINUTES` | no | `tanda_exceptions` flags finished shifts shorter than this as `micro_shift`. Default 5 |
+| `PAY_CALENDAR` | no | Pay period segments for `tanda_pay_periods`, as comma-separated `first-period-start:days`. Default `2026-12-14:14,2026-12-28:7` (biweekly until 2026-12-27, then weekly). Each segment runs until the next starts; dates before the first extrapolate back with its length |
 | `TANDA_BOOKKEEPING_LOCATION_IDS` | no | Default `281737,301754,396358` |
-| `TANDA_RATE_LIMIT_PER_MIN` | no | Client-side limit, default 80 (Tanda allows 100/min shared across password tokens) |
+| `TANDA_RATE_LIMIT_PER_MIN` | no | Client-side limit per rolling minute, shared by every tool, default 90 (Tanda allows 100/min shared across password tokens) |
 | `MCP_LIST_ALIASES` | no | `true` lists the deprecated names in `tools/list` |
 | `TANDA_WRITES_ENABLED` | no | `true` turns on the write tools (`tanda_create_user`, `tanda_deactivate_user`, `tanda_update_user`, `tanda_approve_timesheets`). Off by default |
 | `TANDA_DEFAULT_AWARD_TEMPLATE_ID` | no | Award template for new users when none is given. Default 42 |
@@ -155,7 +160,7 @@ MCP_URL=https://your-domain.com/mcp MCP_TOKEN=<secret> npm run smoke [from] [to]
 MCP_URL=https://your-domain.com/mcp MCP_TOKEN=<secret> npm run smoke:writes
 ```
 
-`npm run smoke` calls all 12 read tools and the two staffing apps against a running server and prints only the shape and size of each response (no row values). It exits non-zero if a tool errors, exceeds 25 KB, or returns `date_of_birth`/`passcode`.
+`npm run smoke` calls all 13 read tools and the two staffing apps against a running server and prints only the shape and size of each response (no row values). It exits non-zero if a tool errors, exceeds 25 KB, or returns `date_of_birth`/`passcode`.
 
 `npm run smoke:writes` exercises every write tool with the shared secret. Each run creates its own test hire ("ZZ MCP Smoke <run id>", `zz.mcp.smoke.<run id>@example.com`, no invite). It then checks that a duplicate is caught, updates and deactivates the hire, previews approval on an old pay period (`SMOKE_FROM`/`SMOKE_TO`), and checks that the shared token can't apply an approval. It prints step results only. The hire always ends inactive, even when a step fails, so it never counts towards the billed headcount. Each run leaves one inactive test user, because Tanda refuses to reuse an email even for an inactive user.
 
