@@ -8,6 +8,7 @@ A read-only MCP (Model Context Protocol) server for the Tanda / Workforce.com AP
 - **Read-only, with four guarded exceptions.** The Tanda client refuses any non-GET request except `POST /users`, `POST /users/{id}/invite`, `DELETE /users/{id}`, `PUT /users/{id}`, `PUT /timesheets/{id}` and `PUT /shifts/{id}`, and refuses those too unless `TANDA_WRITES_ENABLED=true` (off by default).
 - **Least-privilege scopes.** The server requests `me roster timesheet department user cost leave`. It never requests `financial` or `personal`. `unavailability` is off by default because Workforce.com's OAuth fails when it is requested; add it to `TANDA_SCOPES` only if your OAuth app supports it.
 - **Privacy by default.** User records are whitelisted, and `date_of_birth`, `phone`, `email`, `legal_*` and `hourly_rate` are returned only when the `fields` parameter names them. `passcode`, `tax_*`, `bank_*` and `super_*` are never returned.
+- **Inside Tanda's rate limit.** Every tool shares one budget of 90 Tanda requests per rolling minute (Tanda allows 100). A `429` is retried up to 3 times (Tanda's `Retry-After`, else 2s, 4s, 8s). If it still fails, a check that can fail soft returns a `warnings` entry with `rate_limited: true` instead of failing the tool. Sites and teams are cached for 24 hours, and so are people, except that a user write clears the people cache straight away.
 
 See [docs/SECURITY.md](docs/SECURITY.md).
 
@@ -126,7 +127,7 @@ npm run build && npm start
 | `MIN_SHIFT_MINUTES` | no | `tanda_exceptions` flags finished shifts shorter than this as `micro_shift`. Default 5 |
 | `PAY_CALENDAR` | no | Pay period segments for `tanda_pay_periods`, as comma-separated `first-period-start:days`. Default `2026-12-14:14,2026-12-28:7` (biweekly until 2026-12-27, then weekly). Each segment runs until the next starts; dates before the first extrapolate back with its length |
 | `TANDA_BOOKKEEPING_LOCATION_IDS` | no | Default `281737,301754,396358` |
-| `TANDA_RATE_LIMIT_PER_MIN` | no | Client-side limit, default 80 (Tanda allows 100/min shared across password tokens) |
+| `TANDA_RATE_LIMIT_PER_MIN` | no | Client-side limit per rolling minute, shared by every tool, default 90 (Tanda allows 100/min shared across password tokens) |
 | `MCP_LIST_ALIASES` | no | `true` lists the deprecated names in `tools/list` |
 | `TANDA_WRITES_ENABLED` | no | `true` turns on the write tools (`tanda_create_user`, `tanda_deactivate_user`, `tanda_update_user`, `tanda_approve_timesheets`). Off by default |
 | `TANDA_DEFAULT_AWARD_TEMPLATE_ID` | no | Award template for new users when none is given. Default 42 |

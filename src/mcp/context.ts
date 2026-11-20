@@ -27,7 +27,8 @@ export function hasLevel(user: Rec | undefined, level: string): boolean {
 }
 
 export const ORG_TTL_MS = 24 * 60 * 60 * 1000;
-const USERS_TTL_MS = 10 * 60 * 1000;
+/** People change rarely; the client clears this cache after any user write (create, update, deactivate). */
+export const USERS_TTL_MS = 24 * 60 * 60 * 1000;
 
 export interface Org {
   locations: Rec[];
@@ -92,7 +93,7 @@ export interface People {
   name(id: unknown): string | null;
 }
 
-/** Active users (cached 10 min). Only names/ids are used from here; callers whitelist fields. */
+/** Active users (cached 24h, then revalidated with ETag). Only names/ids are used from here; callers whitelist fields. */
 export async function loadPeople(client: TandaClient): Promise<People> {
   return peopleFrom(await client.getUsers({ freshMs: USERS_TTL_MS }));
 }

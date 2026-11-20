@@ -37,6 +37,8 @@ export interface TandaClientOptions {
    * instead of this client spending its own copy of the refresh token.
    */
   refresh?: (failedAccessToken: string) => Promise<string>;
+  /** Replaces the wait between 429 retries (tests only). */
+  sleep?: (ms: number) => Promise<void>;
   /** True for the server's own TANDA_ACCESS_TOKEN identity (shared-secret auth), not a person's OAuth login. */
   sharedIdentity?: boolean;
 }
@@ -51,6 +53,20 @@ export interface GetOptions {
 
 /** Tanda rejects date ranges longer than this on list endpoints. */
 export const TANDA_MAX_RANGE_DAYS = 7;
+
+/** A 429 is retried this many times before the call fails (or degrades to a `rate_limited` warning). */
+export const RATE_LIMIT_RETRIES = 3;
+
+/**
+ * Wait before retry `n` (1-based) of a 429: Tanda's Retry-After when it sends one, else
+ * exponential backoff (2s, 4s, 8s), capped at 10s so a tool call stays well inside client timeouts.
+ */
+export function rateLimitBackoffMs(n: number, retryAfterSeconds?: number): number {
+  const seconds = retryAfterSeconds && retryAfterSeconds > 0 ? retryAfterSeconds : 2 ** n;
+  return Math.min(seconds, 10) * 1000;
+}
+
+const defaultSleep = (ms: number) => new Promise<void>((r) => setTimeout(r, ms));
 
 /** Shared across clients so caches survive the per-request client instances. */
 const etagCache = new ETagCache(1000);
@@ -160,7 +176,7 @@ export class TandaClient {
   }
 
   /**
-   * GET with ETag/If-None-Match caching, one 401 refresh retry and one 429 retry.
+   * GET with ETag/If-None-Match caching, one 401 refresh retry and up to RATE_LIMIT_RETRIES 429 retries.
    */
   async get<T = unknown>(path: string, params: Record<string, string | undefined> = {}, opts: GetOptions = {}): Promise<T> {
     const clean: Record<string, string> = {};
@@ -176,6 +192,7 @@ export class TandaClient {
     };
 
     let attempt = 0;
+    let rateLimitRetries = 0;
     for (;;) {
       try {
         const response = await this.client.get(path, reqConfig);
@@ -197,10 +214,10 @@ export class TandaClient {
             /* fall through to error mapping */
           }
         }
-        if (status === 429 && attempt === 0) {
-          attempt++;
-          const retryAfter = Number((error as AxiosError).response?.headers?.['retry-after']) || 5;
-          await new Promise((r) => setTimeout(r, Math.min(retryAfter, 10) * 1000));
+        if (status === 429 && rateLimitRetries < RATE_LIMIT_RETRIES) {
+          rateLimitRetries++;
+          const retryAfter = Number((error as AxiosError).response?.headers?.['retry-after']) || undefined;
+          await (this.options.sleep ?? defaultSleep)(rateLimitBackoffMs(rateLimitRetries, retryAfter));
           continue;
         }
         throw this.toApiError(error, path);
@@ -216,7 +233,10 @@ export class TandaClient {
     let refreshed = false;
     for (;;) {
       try {
-        return (await this.client.request<T>({ method, url: path, data: body })).data;
+        const data = (await this.client.request<T>({ method, url: path, data: body })).data;
+        // People are cached for a day; a user write must show up on the next read.
+        if (path.startsWith('/users')) etagCache.deleteMatching(this.cacheScope, '/users');
+        return data;
       } catch (error) {
         const status = (error as AxiosError).response?.status;
         if (status === 401 && !refreshed && (this.refreshToken || this.options.refresh)) {
