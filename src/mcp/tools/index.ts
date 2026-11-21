@@ -19,6 +19,7 @@ import { changeHistoryTool } from './changeHistory';
 import { dataAuditTool } from './dataAudit';
 import { payPeriodsTool } from './payPeriods';
 import { approvalQueueTool } from './approvalQueue';
+import { payrollPreflightTool } from './payrollPreflight';
 import { createUserTool, CREATE_USER_TOOL } from './createUser';
 import { deactivateUserTool, DEACTIVATE_USER_TOOL } from './deactivateUser';
 import { approveTimesheetsTool, APPROVE_TIMESHEETS_TOOL } from './approveTimesheets';
@@ -48,6 +49,7 @@ export const TOOLS: Tool[] = [
   dataAuditTool,
   payPeriodsTool,
   approvalQueueTool,
+  payrollPreflightTool,
   siteScheduleTool,
   allocationBoardTool,
   createUserTool,

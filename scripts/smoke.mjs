@@ -53,6 +53,7 @@ const calls = [
   ['tanda_data_audit', {}],
   ['tanda_pay_periods', {}],
   ['tanda_approval_queue', {}],
+  ['tanda_payroll_preflight', {}],
   // MCP App tools: the data is in structuredContent, the text is a summary
   ['conversation_to_site_schedule', { site_name: 'Smoke test site' }],
   ['staff_allocation_board', { cleaners_needed: 2 }],
