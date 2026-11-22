@@ -72,8 +72,10 @@ export function exclusionFor(
   return null;
 }
 
-/** Sites and departments each person is on staff at or rostered to this week, for ranking. */
-function familiarity(org: Org, schedules: Rec[]): { depts: Map<number, Set<number>>; sites: Map<number, Set<number>> } {
+export type Familiarity = { depts: Map<number, Set<number>>; sites: Map<number, Set<number>> };
+
+/** Sites and departments each person is on staff at or rostered to, for ranking. */
+export function familiarity(org: Org, schedules: Rec[]): Familiarity {
   const depts = new Map<number, Set<number>>();
   const add = (uid: number, dept: number) => {
     let set = depts.get(uid);
@@ -83,6 +85,93 @@ function familiarity(org: Org, schedules: Rec[]): { depts: Map<number, Set<numbe
   for (const d of org.departments) for (const uid of Array.isArray(d.staff) ? (d.staff as number[]) : []) add(uid, d.id as number);
   for (const s of schedules) if (s.user_id && s.department_id) add(s.user_id as number, s.department_id as number);
   return { depts, sites: userSitesFrom(org, schedules) };
+}
+
+export interface LeftOut { office: number; test_or_no_start_date: number; not_employee_level: number }
+
+/** Who may be proposed: active employee-level field staff, not test users, not `absentIds`; `left_out` counts the rest. */
+export function coverPool(users: Rec[], org: Org, fam: Familiarity, absentIds: Set<number>): { pool: Rec[]; leftOut: LeftOut } {
+  const excluded = coverageExcludedUserIds();
+  const officeAllowed = officeAllowedIds();
+  const leftOut: LeftOut = { office: 0, test_or_no_start_date: 0, not_employee_level: 0 };
+  const pool: Rec[] = [];
+  for (const u of users) {
+    const id = u.id as number;
+    if (absentIds.has(id) || u.active === false || excluded.has(id)) continue;
+    if (isTestOrNoStartDate(u)) leftOut.test_or_no_start_date++;
+    else if (!hasLevel(u, 'employee')) leftOut.not_employee_level++;
+    else if (!officeAllowed.has(id) && isOfficeOnly(org, fam.sites.get(id))) leftOut.office++;
+    else pool.push(u);
+  }
+  return { pool, leftOut };
+}
+
+export interface CoverCtx { schedules: Rec[]; leave: Rec[]; unavailability: Rec[]; weekHours: Map<number, number>; maxWeekly: number }
+
+export interface RankedCandidate { u: Rec; knowsSite: boolean; sameDept: boolean; hours: number; months: number }
+
+/**
+ * Everyone in `pool` who can take `need`, best first: works in that department, then at that site,
+ * then fewest hours this week, then longest tenure. `excluded` counts why the others can't.
+ */
+export function rankCover(need: CoverNeed, pool: Rec[], org: Org, fam: Familiarity, ctx: CoverCtx, today: string): { ranked: RankedCandidate[]; excluded: Record<string, number> } {
+  // A Supervisor-department shift is only offered to people on a Supervisor department's staff
+  const supervisorShift = need.department_id !== null && org.supervisorDeptIds.has(need.department_id);
+  const counts: Record<Exclusion, number> = { on_leave: 0, unavailable: 0, rostered_at_that_time: 0, over_weekly_hours: 0 };
+  let notSupervisor = 0;
+  const ranked: RankedCandidate[] = [];
+  for (const u of pool) {
+    const id = u.id as number;
+    const depts = fam.depts.get(id) || new Set<number>();
+    if (supervisorShift && ![...depts].some((d) => org.supervisorDeptIds.has(d))) {
+      notSupervisor++;
+      continue;
+    }
+    const why = exclusionFor(id, need, ctx);
+    if (why) {
+      counts[why]++;
+      continue;
+    }
+    ranked.push({
+      u,
+      knowsSite: need.location_id !== null && (fam.sites.get(id)?.has(need.location_id) ?? false),
+      sameDept: need.department_id !== null && depts.has(need.department_id),
+      hours: ctx.weekHours.get(id) || 0,
+      months: tenureFrom(u.employment_start_date, today)?.total_months ?? -1,
+    });
+  }
+  ranked.sort((a, b) =>
+    Number(b.sameDept) - Number(a.sameDept) || Number(b.knowsSite) - Number(a.knowsSite) ||
+    a.hours - b.hours || b.months - a.months || String(a.u.name).localeCompare(String(b.u.name)));
+  return { ranked, excluded: { ...counts, ...(supervisorShift ? { not_a_supervisor: notSupervisor } : {}) } };
+}
+
+/** One proposed person, with the reason in plain words. */
+export function candidateRow(c: RankedCandidate, need: CoverNeed, maxWeekly: number, today: string): Rec {
+  const after = round2(c.hours + need.hours);
+  return {
+    user_id: c.u.id,
+    user_name: c.u.name ?? null,
+    knows_site: c.knowsSite,
+    same_department: c.sameDept,
+    week_hours: round2(c.hours),
+    week_hours_after: after,
+    tenure_label: tenureFrom(c.u.employment_start_date, today)?.label ?? null,
+    why: [
+      c.sameDept ? 'works in this department' : c.knowsSite ? 'works at this site' : 'new to this site',
+      `${after}h of ${maxWeekly}h this week with the shift`,
+    ].join('; '),
+  };
+}
+
+/** Hours each person is rostered in `schedules` (callers pass one workweek). */
+export function hoursByUser(schedules: Rec[]): Map<number, number> {
+  const weekHours = new Map<number, number>();
+  for (const s of schedules) {
+    const uid = s.user_id as number | null | undefined;
+    if (uid) weekHours.set(uid, (weekHours.get(uid) || 0) + itemHours(s));
+  }
+  return weekHours;
 }
 
 export const proposeCoverTool: Tool = {
@@ -161,19 +250,8 @@ export const proposeCoverTool: Tool = {
     }
 
     // Candidate pool: active employees who are field staff, not test users, not the absent person
-    const excluded = coverageExcludedUserIds();
-    const officeAllowed = officeAllowedIds();
     const fam = familiarity(org, schedules);
-    const leftOut = { office: 0, test_or_no_start_date: 0, not_employee_level: 0 };
-    const pool: Rec[] = [];
-    for (const u of people.users) {
-      const id = u.id as number;
-      if (id === absent || u.active === false || excluded.has(id)) continue;
-      if (isTestOrNoStartDate(u)) leftOut.test_or_no_start_date++;
-      else if (!hasLevel(u, 'employee')) leftOut.not_employee_level++;
-      else if (!officeAllowed.has(id) && isOfficeOnly(org, fam.sites.get(id))) leftOut.office++;
-      else pool.push(u);
-    }
+    const { pool, leftOut } = coverPool(people.users, org, fam, new Set(absent !== null ? [absent] : []));
 
     // Leave and unavailability over the shifts' dates (an overnight shift runs into the next day). Each fails soft.
     const poolIds = pool.map((u) => u.id as number);
@@ -186,11 +264,7 @@ export const proposeCoverTool: Tool = {
         ])
       : [[], []];
 
-    const weekHours = new Map<number, number>();
-    for (const s of schedules) {
-      const uid = s.user_id as number | null | undefined;
-      if (uid) weekHours.set(uid, (weekHours.get(uid) || 0) + itemHours(s));
-    }
+    const weekHours = hoursByUser(schedules);
     // Shifts the absent person is giving up don't count against anyone
     const coveredIds = new Set<unknown>(needs.map((n) => n.schedule_id).filter((id) => id !== null));
     const others = schedules.filter((s) => !coveredIds.has(s.id));
@@ -199,52 +273,8 @@ export const proposeCoverTool: Tool = {
 
     const rows: Rec[] = [];
     const shifts = needs.map((need, index) => {
-      // A Supervisor-department shift is only offered to people on a Supervisor department's staff
-      const supervisorShift = need.department_id !== null && org.supervisorDeptIds.has(need.department_id);
-      const counts: Record<Exclusion, number> = { on_leave: 0, unavailable: 0, rostered_at_that_time: 0, over_weekly_hours: 0 };
-      let notSupervisor = 0;
-      const ok: Array<{ u: Rec; knowsSite: boolean; sameDept: boolean; hours: number; months: number }> = [];
-      for (const u of pool) {
-        const id = u.id as number;
-        const depts = fam.depts.get(id) || new Set<number>();
-        if (supervisorShift && ![...depts].some((d) => org.supervisorDeptIds.has(d))) {
-          notSupervisor++;
-          continue;
-        }
-        const why = exclusionFor(id, need, ctx);
-        if (why) {
-          counts[why]++;
-          continue;
-        }
-        ok.push({
-          u,
-          knowsSite: need.location_id !== null && (fam.sites.get(id)?.has(need.location_id) ?? false),
-          sameDept: need.department_id !== null && depts.has(need.department_id),
-          hours: weekHours.get(id) || 0,
-          months: tenureFrom(u.employment_start_date, today)?.total_months ?? -1,
-        });
-      }
-      ok.sort((a, b) =>
-        Number(b.sameDept) - Number(a.sameDept) || Number(b.knowsSite) - Number(a.knowsSite) ||
-        a.hours - b.hours || b.months - a.months || String(a.u.name).localeCompare(String(b.u.name)));
-      ok.slice(0, maxCandidates).forEach((c, i) => {
-        const after = round2(c.hours + need.hours);
-        rows.push({
-          shift: index,
-          rank: i + 1,
-          user_id: c.u.id,
-          user_name: c.u.name ?? null,
-          knows_site: c.knowsSite,
-          same_department: c.sameDept,
-          week_hours: round2(c.hours),
-          week_hours_after: after,
-          tenure_label: tenureFrom(c.u.employment_start_date, today)?.label ?? null,
-          why: [
-            c.sameDept ? 'works in this department' : c.knowsSite ? 'works at this site' : 'new to this site',
-            `${after}h of ${maxWeekly}h this week with the shift`,
-          ].join('; '),
-        });
-      });
+      const { ranked, excluded } = rankCover(need, pool, org, fam, ctx, today);
+      ranked.slice(0, maxCandidates).forEach((c, i) => rows.push({ shift: index, rank: i + 1, ...candidateRow(c, need, maxWeekly, today) }));
       return {
         shift: index,
         schedule_id: need.schedule_id,
@@ -254,8 +284,8 @@ export const proposeCoverTool: Tool = {
         start_iso: toZonedISO(need.span[0]),
         finish_iso: toZonedISO(need.span[1]),
         hours: need.hours,
-        eligible: ok.length,
-        excluded: { ...counts, ...(supervisorShift ? { not_a_supervisor: notSupervisor } : {}) },
+        eligible: ranked.length,
+        excluded,
       };
     });
 
