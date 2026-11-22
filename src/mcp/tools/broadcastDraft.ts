@@ -56,13 +56,12 @@ function spokenTime(time: string | undefined, lang: 'es' | 'en'): string {
 }
 
 function fill(message: string, values: Record<string, string | null>, lang: string): string {
-  const out = message.replace(/\{(\w+)\}/g, (whole, key: string) => {
+  return message.replace(/\{(\w+)\}/g, (whole, key: string) => {
     if (!(key in values)) throw new ArgError(`Unknown placeholder ${whole} in the ${lang} message. Use {site}, {date} or {time}.`);
     const v = values[key];
     if (v === null) throw new ArgError(`The ${lang} message uses ${whole}; give ${key === 'site' ? 'location_id' : key}.`);
     return v;
   });
-  return out;
 }
 
 export const broadcastDraftTool: Tool = {

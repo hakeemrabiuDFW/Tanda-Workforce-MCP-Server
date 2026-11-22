@@ -1,7 +1,7 @@
 /**
  * SMS length maths for draft messages (WFM-105). A message that fits the GSM-7 alphabet is
- * 160 characters a segment (153 when split); one character outside it (e.g. Spanish á, í, ó, ú,
- * ¿ are not all in GSM-7) makes the whole message UCS-2: 70 a segment (67 when split).
+ * 160 characters a segment (153 when split); one character outside it (e.g. Spanish á, í, ó, ú)
+ * makes the whole message UCS-2: 70 a segment (67 when split).
  */
 
 // GSM 03.38 basic set (one septet each)
