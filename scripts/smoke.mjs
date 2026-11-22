@@ -56,6 +56,7 @@ const calls = [
   ['tanda_payroll_preflight', {}],
   ['tanda_propose_cover', null], // filled from tanda_people
   ['tanda_leave_impact', {}],
+  ['tanda_broadcast_draft', null], // filled from tanda_people
   // MCP App tools: the data is in structuredContent, the text is a summary
   ['conversation_to_site_schedule', { site_name: 'Smoke test site' }],
   ['staff_allocation_board', { cleaners_needed: 2 }],
@@ -74,6 +75,9 @@ for (const [name, preset] of calls) {
   }
   if (name === 'tanda_propose_cover') {
     args = { user_id: firstUserId ?? 1, date: to };
+  }
+  if (name === 'tanda_broadcast_draft') {
+    args = { user_ids: [firstUserId ?? 1], message_es: 'Prueba de borrador, no se envía.', message_en: 'Draft test, not sent.' };
   }
   if (name === 'tanda_change_history') {
     if (!firstShiftId) { console.log(`${name.padEnd(24)} SKIP  (no shift id found)`); continue; }
