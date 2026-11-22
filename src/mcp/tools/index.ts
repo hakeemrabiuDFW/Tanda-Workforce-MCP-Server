@@ -22,6 +22,7 @@ import { approvalQueueTool } from './approvalQueue';
 import { payrollPreflightTool } from './payrollPreflight';
 import { proposeCoverTool } from './proposeCover';
 import { leaveImpactTool } from './leaveImpact';
+import { broadcastDraftTool } from './broadcastDraft';
 import { createUserTool, CREATE_USER_TOOL } from './createUser';
 import { deactivateUserTool, DEACTIVATE_USER_TOOL } from './deactivateUser';
 import { approveTimesheetsTool, APPROVE_TIMESHEETS_TOOL } from './approveTimesheets';
@@ -54,6 +55,7 @@ export const TOOLS: Tool[] = [
   payrollPreflightTool,
   proposeCoverTool,
   leaveImpactTool,
+  broadcastDraftTool,
   siteScheduleTool,
   allocationBoardTool,
   createUserTool,
