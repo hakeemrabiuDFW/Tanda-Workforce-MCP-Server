@@ -53,6 +53,7 @@ Scopes come from `TANDA_SCOPES` (space or comma separated). The default is the l
 | `cost` | Schedule and timesheet costs |
 | `leave` | Leave requests and balances |
 | `unavailability` | Staff unavailability |
+| `qualifications` | Optional, not in the default set: certification names for `tanda_qualifications_watch` (read-only). Without it the tool still lists expiry dates, by qualification id |
 
 `financial` and `personal` are never requested. If they appear in `TANDA_SCOPES` they are dropped
 and a warning is logged. The same list is advertised in `/.well-known/oauth-*` metadata.
