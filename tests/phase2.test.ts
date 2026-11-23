@@ -10,7 +10,7 @@ const range = { from: FIXTURE_FROM, to: FIXTURE_TO };
 const EXPECTED = [
   'tanda_org', 'tanda_people', 'tanda_schedules', 'tanda_timesheets', 'tanda_live', 'tanda_time_off',
   'tanda_labor_summary', 'tanda_coverage', 'tanda_validate_schedule', 'tanda_exceptions',
-  'tanda_export_preview', 'tanda_change_history', 'tanda_data_audit', 'tanda_pay_periods', 'tanda_approval_queue', 'tanda_payroll_preflight', 'tanda_propose_cover', 'tanda_leave_impact', 'tanda_broadcast_draft', 'tanda_qualifications_watch',
+  'tanda_export_preview', 'tanda_change_history', 'tanda_data_audit', 'tanda_pay_periods', 'tanda_approval_queue', 'tanda_payroll_preflight', 'tanda_propose_cover', 'tanda_leave_impact', 'tanda_broadcast_draft', 'tanda_qualifications_watch', 'tanda_access_audit',
 ];
 
 /** One representative call per tool against the 84-site / 70-user fixture. */
@@ -35,6 +35,7 @@ export const SMOKE_CALLS: Array<[string, Record<string, unknown>]> = [
   ['tanda_leave_impact', range],
   ['tanda_broadcast_draft', { template: 'shift_reminder', location_id: 1005, date: FIXTURE_FROM }],
   ['tanda_qualifications_watch', {}],
+  ['tanda_access_audit', {}],
 ];
 
 beforeAll(() => {
@@ -42,7 +43,7 @@ beforeAll(() => {
 });
 
 describe('tool surface', () => {
-  it('exposes the 20 v4 read tools, the two staffing app tools, plus the four write tools', () => {
+  it('exposes the 21 v4 read tools, the two staffing app tools, plus the four write tools', () => {
     expect(tandaTools.map((t) => t.name)).toEqual([...EXPECTED, 'conversation_to_site_schedule', 'staff_allocation_board', 'tanda_create_user', 'tanda_deactivate_user', 'tanda_approve_timesheets', 'tanda_update_user']);
   });
 
