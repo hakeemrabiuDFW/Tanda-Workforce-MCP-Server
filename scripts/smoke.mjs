@@ -58,6 +58,7 @@ const calls = [
   ['tanda_leave_impact', {}],
   ['tanda_broadcast_draft', null], // filled from tanda_people
   ['tanda_qualifications_watch', {}],
+  ['tanda_access_audit', {}],
   // MCP App tools: the data is in structuredContent, the text is a summary
   ['conversation_to_site_schedule', { site_name: 'Smoke test site' }],
   ['staff_allocation_board', { cleaners_needed: 2 }],
