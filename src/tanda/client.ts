@@ -81,6 +81,7 @@ function scopeFor(path: string): string {
   if (path.startsWith('/leave')) return 'leave';
   if (path.startsWith('/unavailability')) return 'unavailability';
   if (path.startsWith('/clockins')) return 'device';
+  if (path.startsWith('/qualifications')) return 'qualifications';
   return 'the required';
 }
 
@@ -314,10 +315,15 @@ export class TandaClient {
     return this.get<TandaUser>('/users/me');
   }
 
-  async getUsers(filter: { updated_after?: string; department_ids?: number[]; freshMs?: number; show_wages?: boolean } = {}): Promise<Rec[]> {
+  async getUsers(filter: { updated_after?: string; department_ids?: number[]; freshMs?: number; show_wages?: boolean; show_qualifications?: boolean } = {}): Promise<Rec[]> {
     const users = await this.getList(
       '/users',
-      { updated_after: filter.updated_after, show_wages: filter.show_wages ? 'true' : undefined },
+      {
+        updated_after: filter.updated_after,
+        show_wages: filter.show_wages ? 'true' : undefined,
+        // Tanda leaves per-user qualifications out by default once an account has more than 50
+        show_qualifications: filter.show_qualifications ? 'true' : undefined,
+      },
       { freshMs: filter.freshMs }
     );
     if (filter.department_ids?.length) {
@@ -340,6 +346,11 @@ export class TandaClient {
     const [department, users] = await Promise.all([this.getDepartment(departmentId), this.getUsers()]);
     const staff = new Set((department.staff as number[]) || []);
     return users.filter((u) => staff.has(u.id as number));
+  }
+
+  /** Qualification types (names). Needs the "qualifications" scope; expiry dates come with /users. */
+  async getQualifications(opts: GetOptions = {}): Promise<Rec[]> {
+    return this.getList('/qualifications', {}, opts);
   }
 
   // ==================== Org ====================

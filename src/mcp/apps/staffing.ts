@@ -92,9 +92,14 @@ export function officeAllowedIds(): Set<number> {
   return envUserIds('STAFFING_OFFICE_ALLOW_USER_IDS');
 }
 
-/** A test account ("ZZ …", "Test …") or someone Tanda has no employment start date for. */
+/** A test account ("ZZ …", "Test …"). */
+export function isTestUser(u: Rec): boolean {
+  return TEST_NAME_RE.test(String(u.name ?? ''));
+}
+
+/** A test account or someone Tanda has no employment start date for. */
 export function isTestOrNoStartDate(u: Rec): boolean {
-  return TEST_NAME_RE.test(String(u.name ?? '')) || !isDate(u.employment_start_date);
+  return isTestUser(u) || !isDate(u.employment_start_date);
 }
 
 /** Every real (non-bookkeeping) site each person is on staff at or rostered to, to spot office-only staff. */
