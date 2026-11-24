@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 /**
- * Smoke test: calls all 12 v4 tools and the two staffing app tools on a running server and
+ * Smoke test: calls all the v4 read tools and the two staffing app tools on a running server and
  * prints shape + size only.
  * No row values are printed, so no PII reaches the terminal.
  *
@@ -51,6 +51,15 @@ const calls = [
   ['tanda_export_preview', { date: to }],
   ['tanda_change_history', null], // filled from tanda_timesheets
   ['tanda_data_audit', {}],
+  ['tanda_pay_periods', {}],
+  ['tanda_approval_queue', {}],
+  ['tanda_payroll_preflight', {}],
+  ['tanda_propose_cover', null], // filled from tanda_people
+  ['tanda_leave_impact', {}],
+  ['tanda_broadcast_draft', null], // filled from tanda_people
+  ['tanda_qualifications_watch', {}],
+  ['tanda_access_audit', {}],
+  ['tanda_labor_vs_revenue', { ...range, revenue: [{ site: 'Smoke test site', amount: 1000 }] }],
   // MCP App tools: the data is in structuredContent, the text is a summary
   ['conversation_to_site_schedule', { site_name: 'Smoke test site' }],
   ['staff_allocation_board', { cleaners_needed: 2 }],
@@ -66,6 +75,12 @@ for (const [name, preset] of calls) {
   let args = preset;
   if (name === 'tanda_validate_schedule') {
     args = { shifts: [{ user_id: firstUserId ?? 1, start: `${to} 09:00`, finish: `${to} 17:00` }] };
+  }
+  if (name === 'tanda_propose_cover') {
+    args = { user_id: firstUserId ?? 1, date: to };
+  }
+  if (name === 'tanda_broadcast_draft') {
+    args = { user_ids: [firstUserId ?? 1], message_es: 'Prueba de borrador, no se envía.', message_en: 'Draft test, not sent.' };
   }
   if (name === 'tanda_change_history') {
     if (!firstShiftId) { console.log(`${name.padEnd(24)} SKIP  (no shift id found)`); continue; }

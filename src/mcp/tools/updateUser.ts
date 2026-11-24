@@ -12,7 +12,7 @@ import { logger } from '../../utils/logger';
 export const UPDATE_USER_TOOL = 'tanda_update_user';
 
 /** The only user fields this tool will send to PUT /users/{id}: no level, email, name, tax or bank changes. */
-export const UPDATABLE_FIELDS = ['hourly_rate', 'award_template_id', 'employment_start_date', 'department_ids', 'employee_id'] as const;
+export const UPDATABLE_FIELDS = ['hourly_rate', 'award_template_id', 'employment_start_date', 'department_ids', 'employee_id', 'employment_end_date', 'payroll_cessation_code'] as const;
 type Field = (typeof UPDATABLE_FIELDS)[number];
 
 export const MAX_UPDATES = 50;
@@ -46,6 +46,12 @@ function parseChanges(raw: Rec, where: string): UserUpdate['changes'] {
   }
   const employeeId = text(raw.employee_id, `${where}employee_id`, 50);
   if (employeeId) changes.employee_id = employeeId;
+  if (raw.employment_end_date !== undefined && raw.employment_end_date !== null && raw.employment_end_date !== '') {
+    if (!isDate(raw.employment_end_date)) throw new ArgError(`${where}employment_end_date must be a date in YYYY-MM-DD format.`);
+    changes.employment_end_date = raw.employment_end_date;
+  }
+  const cessation = text(raw.payroll_cessation_code, `${where}payroll_cessation_code`, 10);
+  if (cessation) changes.payroll_cessation_code = cessation;
   if (!Object.keys(changes).length) throw new ArgError(`${where}nothing to change: give at least one of ${UPDATABLE_FIELDS.join(', ')}.`);
   return changes;
 }
@@ -124,6 +130,12 @@ async function plan(client: TandaClient, update: UserUpdate, callerId: unknown):
     const before = user[field] ?? null;
     if (sameValue(field, before, after)) continue;
     diff.push({ field, before, after });
+    // Offboarding: Tanda deactivates the profile when the end date passes, so say so up front
+    if (field === 'employment_end_date') {
+      flags.push('employment_end_date set: Tanda deactivates this profile after that day');
+      const start = user.employment_start_date;
+      if (typeof start === 'string' && isDate(start) && (after as string) < start) flags.push('employment_end_date is before employment_start_date');
+    }
     if (field === 'hourly_rate' && typeof before === 'number' && before > 0 && Math.abs((after as number) - before) / before > RATE_CHANGE_FLAG) {
       flags.push(`hourly_rate changes by more than ${RATE_CHANGE_FLAG * 100}%`);
     }
@@ -148,7 +160,7 @@ function previewRow(p: Planned, showWages: boolean): Rec {
 export const updateUserTool: Tool = {
   name: UPDATE_USER_TOOL,
   description:
-    'Updates pay rate, award template, start date, teams or employee id for Tanda employees (one, or up to 50 via updates) in two steps: a call without confirm_token previews a before/after diff and a confirm_token, and the same call plus the token applies it. ' +
+    'Updates pay rate, award template, start date, teams, employee id, end date or cessation code for Tanda employees (one, or up to 50 via updates) in two steps: a call without confirm_token previews a before/after diff and a confirm_token, and the same call plus the token applies it. ' +
     'Refuses managers, admins and the caller.',
   inputSchema: {
     type: 'object',
@@ -159,9 +171,11 @@ export const updateUserTool: Tool = {
       employment_start_date: { type: 'string', description: 'Start date YYYY-MM-DD' },
       department_ids: { type: 'array', items: { type: 'number' }, description: 'Replaces the user\'s teams' },
       employee_id: { type: 'string', description: 'Payroll employee id' },
+      employment_end_date: { type: 'string', description: 'Last day YYYY-MM-DD; Tanda deactivates the profile after it (offboarding)' },
+      payroll_cessation_code: { type: 'string', description: 'Tanda payroll cessation code: the termination reason (offboarding)' },
       updates: {
         type: 'array',
-        description: 'Bulk form, max 50: [{user_id, hourly_rate?, award_template_id?, employment_start_date?, department_ids?, employee_id?}]',
+        description: 'Bulk form, max 50: [{user_id, hourly_rate?, award_template_id?, employment_start_date?, department_ids?, employee_id?, employment_end_date?, payroll_cessation_code?}]',
         items: { type: 'object' },
       },
       source_ref: { type: 'string', description: 'Audit reference, e.g. "iSolved rate backfill". Required when called with the shared server token (ADR 0001)' },

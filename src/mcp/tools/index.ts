@@ -17,6 +17,15 @@ import { exceptionsTool } from './exceptions';
 import { exportPreviewTool } from './exportPreview';
 import { changeHistoryTool } from './changeHistory';
 import { dataAuditTool } from './dataAudit';
+import { payPeriodsTool } from './payPeriods';
+import { approvalQueueTool } from './approvalQueue';
+import { payrollPreflightTool } from './payrollPreflight';
+import { proposeCoverTool } from './proposeCover';
+import { leaveImpactTool } from './leaveImpact';
+import { broadcastDraftTool } from './broadcastDraft';
+import { qualificationsWatchTool } from './qualificationsWatch';
+import { accessAuditTool } from './accessAudit';
+import { laborVsRevenueTool } from './laborVsRevenue';
 import { createUserTool, CREATE_USER_TOOL } from './createUser';
 import { deactivateUserTool, DEACTIVATE_USER_TOOL } from './deactivateUser';
 import { approveTimesheetsTool, APPROVE_TIMESHEETS_TOOL } from './approveTimesheets';
@@ -44,6 +53,15 @@ export const TOOLS: Tool[] = [
   exportPreviewTool,
   changeHistoryTool,
   dataAuditTool,
+  payPeriodsTool,
+  approvalQueueTool,
+  payrollPreflightTool,
+  proposeCoverTool,
+  leaveImpactTool,
+  broadcastDraftTool,
+  qualificationsWatchTool,
+  accessAuditTool,
+  laborVsRevenueTool,
   siteScheduleTool,
   allocationBoardTool,
   createUserTool,

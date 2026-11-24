@@ -4,7 +4,7 @@
  * target week, and how long they have been with the company. Read-only: only GETs
  * /locations, /departments, /users and /schedules.
  */
-import { TandaClient } from '../../tanda/client';
+import { Rec, TandaClient } from '../../tanda/client';
 import { ArgError, Args, num } from '../args';
 import { coverageExcludedUserIds, loadOrg, loadPeople, Org } from '../context';
 import { itemHours } from '../../tanda/normalize';
@@ -92,6 +92,43 @@ export function officeAllowedIds(): Set<number> {
   return envUserIds('STAFFING_OFFICE_ALLOW_USER_IDS');
 }
 
+/** A test account ("ZZ …", "Test …"). */
+export function isTestUser(u: Rec): boolean {
+  return TEST_NAME_RE.test(String(u.name ?? ''));
+}
+
+/** A test account or someone Tanda has no employment start date for. */
+export function isTestOrNoStartDate(u: Rec): boolean {
+  return isTestUser(u) || !isDate(u.employment_start_date);
+}
+
+/** Every real (non-bookkeeping) site each person is on staff at or rostered to, to spot office-only staff. */
+export function userSitesFrom(org: Org, schedules: Rec[]): Map<number, Set<number>> {
+  const userSites = new Map<number, Set<number>>();
+  const addSite = (uid: number, loc: number | null) => {
+    if (loc === null || org.isBookkeepingLocation(loc)) return;
+    let sites = userSites.get(uid);
+    if (!sites) userSites.set(uid, (sites = new Set()));
+    sites.add(loc);
+  };
+  for (const d of org.departments) {
+    const loc = (d.location_id as number | undefined) ?? null;
+    for (const uid of Array.isArray(d.staff) ? (d.staff as number[]) : []) addSite(uid, loc);
+  }
+  for (const s of schedules) {
+    const uid = s.user_id as number | null | undefined;
+    const deptId = (s.department_id as number | undefined) ?? null;
+    if (uid) addSite(uid, deptId !== null ? org.deptLocation.get(deptId) ?? null : null);
+  }
+  return userSites;
+}
+
+/** True when every site a person has is the Administrative Office: they are not field staff. */
+export function isOfficeOnly(org: Org, sites: Set<number> | undefined): boolean {
+  const list = [...(sites || [])];
+  return list.length > 0 && list.every((loc) => OFFICE_SITE_RE.test(org.locationName(loc) ?? ''));
+}
+
 /** The workweek to plan in: the one containing `week_of`, else the one containing tomorrow. */
 export function targetWeek(args: Args): { from: string; to: string; basis: string } {
   const given = args.week_of;
@@ -159,14 +196,7 @@ export async function loadStaffing(
   const supervisorStaff = new Set<number>();
   const trainerDeptStaff = new Set<number>();
   const firstSite = new Map<number, number>();
-  // Every real (non-bookkeeping) site each person is on staff at or rostered to, to spot office-only staff
-  const userSites = new Map<number, Set<number>>();
-  const addSite = (uid: number, loc: number | null) => {
-    if (loc === null || org.isBookkeepingLocation(loc)) return;
-    let sites = userSites.get(uid);
-    if (!sites) userSites.set(uid, (sites = new Set()));
-    sites.add(loc);
-  };
+  const userSites = userSitesFrom(org, schedules);
   for (const d of org.departments) {
     const staff = Array.isArray(d.staff) ? (d.staff as number[]) : [];
     const loc = (d.location_id as number | undefined) ?? null;
@@ -175,7 +205,6 @@ export async function loadStaffing(
     for (const uid of staff) {
       if (isSup) supervisorStaff.add(uid);
       if (isTrainer) trainerDeptStaff.add(uid);
-      addSite(uid, loc);
       if (!isSup && loc !== null && !org.isBookkeepingLocation(loc) && !firstSite.has(uid)) firstSite.set(uid, loc);
     }
   }
@@ -189,7 +218,6 @@ export async function loadStaffing(
     const deptId = (s.department_id as number | undefined) ?? null;
     const loc = deptId !== null ? org.deptLocation.get(deptId) ?? null : null;
     if (uid) {
-      addSite(uid, loc);
       hours.set(uid, (hours.get(uid) || 0) + h);
       if (loc !== null) {
         if (!hoursBySite.has(uid)) hoursBySite.set(uid, new Map());
@@ -211,20 +239,16 @@ export async function loadStaffing(
 
   const pools: Record<Role, Person[]> = { supervisor: [], trainer: [], cleaner: [], trainee: [] };
   const trainersTooNew: string[] = [];
-  const isOfficeOnly = (uid: number): boolean => {
-    const sites = [...(userSites.get(uid) || [])];
-    return sites.length > 0 && sites.every((loc) => OFFICE_SITE_RE.test(org.locationName(loc) ?? ''));
-  };
   const leftOut = { office: 0, test_or_no_start_date: 0 };
   const minMonths = opts.minTenureMonths ?? 0;
   for (const u of people.users) {
     const id = u.id as number;
     if (u.active === false || excluded.has(id)) continue;
-    if (TEST_NAME_RE.test(String(u.name ?? '')) || !isDate(u.employment_start_date)) {
+    if (isTestOrNoStartDate(u)) {
       leftOut.test_or_no_start_date++;
       continue;
     }
-    if (!officeAllowed.has(id) && isOfficeOnly(id)) {
+    if (!officeAllowed.has(id) && isOfficeOnly(org, userSites.get(id))) {
       leftOut.office++;
       continue;
     }
