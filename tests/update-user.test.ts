@@ -107,6 +107,29 @@ describe('tanda_update_user', () => {
     expect(puts(requests)).toHaveLength(0);
   });
 
+  it('offboarding: sets employment_end_date and payroll_cessation_code, flagging the deactivation and a date before the start', async () => {
+    const { client, requests } = tanda();
+    const args = { user_id: 500, employment_end_date: '2026-11-30', payroll_cessation_code: 'V', source_ref: 'offboarding test' };
+    const preview = await run(client, args);
+    expect(preview.content.summary).toMatchObject({ status: 'preview', will_change: 1 });
+    expect(preview.content.rows[0].changes).toEqual([
+      { field: 'employment_end_date', before: null, after: '2026-11-30' },
+      { field: 'payroll_cessation_code', before: null, after: 'V' },
+    ]);
+    expect(preview.content.rows[0].flags).toEqual([expect.stringContaining('deactivates')]);
+    expect(puts(requests)).toHaveLength(0);
+    const res = await run(client, { ...args, confirm_token: preview.content.summary.confirm_token });
+    expect(res.content.summary).toMatchObject({ status: 'applied', succeeded: 1, failed: 0 });
+    expect(puts(requests).map((r) => [r.path, r.body])).toEqual([['/users/500', { employment_end_date: '2026-11-30', payroll_cessation_code: 'V' }]]);
+
+    const early = await run(tanda().client, { user_id: 500, employment_end_date: '2026-01-01' });
+    expect(early.content.rows[0].flags).toEqual([expect.stringContaining('deactivates'), expect.stringContaining('before employment_start_date')]);
+    for (const bad of [{ user_id: 500, employment_end_date: '30/11/2026' }, { user_id: 500, payroll_cessation_code: 'X'.repeat(11) }]) {
+      const r = await run(tanda().client, bad);
+      expect(r.isError).toBe(true);
+    }
+  });
+
   it('acceptance 5: refuses managers, inactive users, the caller, unknown users, other fields and bad rates', async () => {
     const { client, requests } = tanda();
     const res = await run(client, { updates: [502, 503, 1, 999].map((user_id) => ({ user_id, hourly_rate: 15 })) });
